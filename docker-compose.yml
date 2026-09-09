@@ -2,7 +2,7 @@ services:
   api:
     build: .
     ports:
-      - "${APP_PORT:-8000}:8000"
+      - "0.0.0.0:${APP_PORT:-8000}:8000"
     volumes:
       - .:/app
     env_file:

@@ -2,14 +2,75 @@
 
 import uuid
 from datetime import datetime
+from typing import Generic, List, Optional, TypeVar
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models.models import Category, TransactionType
 
 # ============================================================================
+# Базовые response обертки для стандартизации ответов
+# ============================================================================
+
+T = TypeVar("T")
+
+
+class ApiResponse(BaseModel, Generic[T]):
+    """Универсальная обертка для успешных ответов API.
+
+    Атрибуты:
+        status: Статус ответа ('success').
+        data: Данные результата (может быть любой тип T).
+        message: Опциональное сообщение о результате.
+    """
+
+    status: str = Field(default="success", description="Статус ответа")
+    data: T = Field(..., description="Данные результата")
+    message: Optional[str] = Field(default=None, description="Опциональное сообщение о результате")
+
+
+class ErrorResponse(BaseModel):
+    """Обертка для ошибочных ответов.
+
+    Атрибуты:
+        status: Статус ответа ('error').
+        error: Код ошибки или название.
+        message: Описание ошибки.
+    """
+
+    status: str = Field(default="error", description="Статус ответа")
+    error: str = Field(..., description="Код или название ошибки")
+    message: str = Field(..., description="Описание ошибки")
+    details: Optional[dict] = Field(default=None, description="Дополнительные детали ошибки")
+
+
+class BaseResponse(BaseModel):
+    """Базовая схема ответа для простых операций (без данных).
+
+    Используется для операций которые не возвращают значимые данные
+    (например logout, delete).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    status: str = Field(default="success", description="Статус ответа")
+    message: Optional[str] = Field(default=None, description="Сообщение о результате операции")
+
+
+# ============================================================================
 # Схемы аутентификации и пользователей
 # ============================================================================
+
+
+class UserBase(BaseModel):
+    """Базовая схема пользователя с общими полями.
+
+    Атрибуты:
+        email (EmailStr): Адрес электронной почты пользователя.
+        name (str): Имя пользователя.
+    """
+
+    user_id: uuid.UUID = Field(..., description="ID пользователя")
 
 
 class UserRegister(BaseModel):
@@ -85,16 +146,10 @@ class TransactionCreate(BaseModel):
     """
 
     amount: float = Field(..., gt=0, description="Сумма операции (должна быть больше 0)")
-    description: str = Field(
-        ..., min_length=1, max_length=255, description="Описание или назначение платежа"
-    )
+    description: str = Field(..., min_length=1, max_length=255, description="Описание или назначение платежа")
     category: Category = Field(..., description="Категория операции")
-    type: TransactionType = Field(
-        ..., description="Тип операции: income (доход) или expense (расход)"
-    )
-    date: datetime | None = Field(
-        default=None, description="Дата транзакции (по умолчанию текущая)"
-    )
+    type: TransactionType = Field(..., description="Тип операции: income (доход) или expense (расход)")
+    date: datetime | None = Field(default=None, description="Дата транзакции (по умолчанию текущая)")
 
 
 class TransactionResponse(BaseModel):
@@ -164,6 +219,37 @@ class BudgetResponse(BaseModel):
     year: int = Field(..., description="Год")
     spent: float = Field(default=0.0, description="Фактически израсходовано")
     remaining: float = Field(default=0.0, description="Остаток лимита")
+
+
+# ============================================================================
+# Схемы синзронизации данных оффлайн пользователя с сервером
+# ============================================================================
+
+
+class TransactionSyncItem(BaseModel):
+    local_id: Optional[int] = None
+    type: TransactionType
+    category: Category
+    amount: float
+    date: datetime
+    description: str
+
+
+class BudgetSyncItem(BaseModel):
+    category: Category
+    limit_amount: float
+    month: int
+    year: int
+
+
+class SyncPayload(BaseModel):
+    transactions: List[TransactionSyncItem]
+    budgets: List[BudgetSyncItem]
+
+
+class SyncResponse(BaseModel):
+    synced_transactions: List[TransactionResponse]
+    synced_budgets: List[BudgetResponse]
 
 
 # ============================================================================

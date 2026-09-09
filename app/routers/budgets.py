@@ -5,16 +5,30 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.models import User
-from app.schemas.schemas import BudgetCreate, BudgetResponse
+from app.schemas.schemas import ApiResponse, BudgetCreate, BudgetResponse
 from app.services.auth_service import get_current_user
 from app.services.budget_service import BudgetService
 
 router = APIRouter()
 
 
+# TODO: Добавить проверку на существование бюджета по категории,
+#  месяцу и году перед созданием нового бюджета (POST /budgets)
+# TODO: Добавить эндпоинт для обновления бюджета по категории
+#  (PATCH /budgets/{budget_id})
+# TODO: Добавить эндпоинт для удаления бюджета по категории
+#  (DELETE /budgets/{budget_id})
+# TODO: Добавить эндпоинт для получения бюджета по категории
+#  (GET /budgets/{budget_id})
+# TODO: Добавить эндпоинт для получения бюджета по категории и месяцу
+#  (GET /budgets/{category_id}/{month}/{year})
+# TODO: Добавить эндпоинт для получения бюджета по категории и году
+#  (GET /budgets/{category_id}/{year})
+# TODO: Добавить эндпоинт для получения бюджета по категории, месяцу и году
+#  (GET /budgets/{category_id}/{month}/{year})
 @router.post(
     "/",
-    response_model=BudgetResponse,
+    response_model=ApiResponse[BudgetResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Установить бюджет по категории",
 )
@@ -31,21 +45,20 @@ async def create_budget(
         current_user (User): Текущий аутентифицированный пользователь.
 
     Возвращает:
-        BudgetResponse: Созданный бюджет с рассчитанным остатком и израсходованной суммой.
+        ApiResponse[BudgetResponse]: Созданный бюджет с рассчитанным остатком и израсходованной суммой.
     """
     service = BudgetService(db)
-    return service.create(current_user.id, payload)
+    budget = service.create(current_user.id, payload)
+    return {"status": "success", "data": budget}
 
 
 @router.get(
     "/",
-    response_model=list[BudgetResponse],
+    response_model=ApiResponse[list[BudgetResponse]],
     summary="Получить список бюджетов",
 )
 async def list_budgets(
-    month: int | None = Query(
-        default=None, ge=1, le=12, description="Фильтр по номеру месяца (1-12)"
-    ),
+    month: int | None = Query(default=None, ge=1, le=12, description="Фильтр по номеру месяца (1-12)"),
     year: int | None = Query(default=None, ge=2000, le=2100, description="Фильтр по году"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -59,7 +72,8 @@ async def list_budgets(
         current_user (User): Текущий аутентифицированный пользователь.
 
     Возвращает:
-        list[BudgetResponse]: Список бюджетов с актуальными данными по расходам.
+        ApiResponse[list[BudgetResponse]]: Список бюджетов с актуальными данными по расходам.
     """
     service = BudgetService(db)
-    return service.get_all(current_user.id, month=month, year=year)
+    budgets = service.get_all(current_user.id, month=month, year=year)
+    return {"status": "success", "data": budgets}

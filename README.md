@@ -33,7 +33,7 @@ FastAPI бэкенд для персонального финансового т
 
 ## 🚀 Быстрый запуск в Docker (Рекомендуемый способ)
 
-Все сервисы (API и PostgreSQL) запускаются одной командой. Приложение автоматически ожидает готовности базы данных (`healthcheck`) и создает все необходимые таблицы при старте.
+Все сервисы (API и PostgreSQL) запускаются одной командой. Приложение автоматически ожидает готовности базы данных (`healthcheck`).
 
 ### 1. Подготовка конфигурации
 Скопируйте файл переменных окружения:
@@ -120,89 +120,6 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 * **ReDoc документация:** [http://localhost:8000/redoc](http://localhost:8000/redoc)
 * **Проверка статуса сервиса:** [http://localhost:8000/health](http://localhost:8000/health)
 
----
-
-### Пошаговый сценарий использования (cURL)
-
-#### Шаг 1. Регистрация пользователя
-```bash
-curl -X POST "http://localhost:8000/api/v1/auth/register" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "email": "user@example.com",
-       "password": "strongpassword123",
-       "name": "Иван Иванов"
-     }'
-```
-
-#### Шаг 2. Вход и получение JWT токена
-```bash
-curl -X POST "http://localhost:8000/api/v1/auth/login" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "email": "user@example.com",
-       "password": "strongpassword123"
-     }'
-```
-В ответе вернется токен:
-```json
-{
-  "access_token": "eyJhbGciOiJIUzI1NiIs...",
-  "token_type": "bearer"
-}
-```
-
-> **Сохраните токен в переменную терминала для удобства:**
-> ```bash
-> TOKEN="eyJhbGciOiJIUzI1NiIs..."
-> ```
-
-#### Шаг 3. Добавление транзакции (Расход / Доход)
-Категории: `food`, `transport`, `entertainment`, `health`, `subscriptions`, `shopping`, `salary`, `other`.  
-Типы: `income`, `expense`.
-
-```bash
-curl -X POST "http://localhost:8000/api/v1/transactions/" \
-     -H "Authorization: Bearer $TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "amount": 1250.50,
-       "description": "Покупка продуктов",
-       "category": "food",
-       "type": "expense"
-     }'
-```
-
-#### Шаг 4. Получение списка транзакций
-```bash
-curl -X GET "http://localhost:8000/api/v1/transactions/" \
-     -H "Authorization: Bearer $TOKEN"
-```
-
-#### Шаг 5. Установка бюджета
-```bash
-curl -X POST "http://localhost:8000/api/v1/budgets/" \
-     -H "Authorization: Bearer $TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "category": "food",
-       "limit_amount": 25000.0,
-       "month": 9,
-       "year": 2026
-     }'
-```
-
-#### Шаг 6. Просмотр бюджетов (с расчетом потрачено / остаток)
-```bash
-curl -X GET "http://localhost:8000/api/v1/budgets/?month=9&year=2026" \
-     -H "Authorization: Bearer $TOKEN"
-```
-
-#### Шаг 7. Запрос AI-инсайтов и советов
-```bash
-curl -X GET "http://localhost:8000/api/v1/insights/" \
-     -H "Authorization: Bearer $TOKEN"
-```
 
 ---
 
@@ -232,10 +149,28 @@ pytest tests/ -v
 
 ## 🔄 Миграции базы данных (Alembic)
 
-Базовые таблицы создаются автоматически при старте приложения, однако для управления схемой через Alembic доступны команды:
+Проект использует **Alembic** для управления схемой БД. Все таблицы создаются и обновляются через миграции.
+
+### При запуске в Docker:
 
 ```bash
-# Создание новой ревизии на основе моделей
+# Создание новой миграции на основе изменений в моделях
+docker-compose exec api alembic revision --autogenerate -m "description_of_changes"
+
+# Применение всех миграций
+docker-compose exec api alembic upgrade head
+
+# Откат последней миграции
+docker-compose exec api alembic downgrade -1
+
+# Просмотр статуса миграций
+docker-compose exec api alembic current
+```
+
+### При локальном запуске (с активированным venv):
+
+```bash
+# Создание новой миграции
 alembic revision --autogenerate -m "description_of_changes"
 
 # Применение миграций
@@ -244,3 +179,25 @@ alembic upgrade head
 # Откат последней миграции
 alembic downgrade -1
 ```
+
+> [!TIP]
+> Миграции хранятся в папке `migrations/versions/`. Каждая миграция содержит функции `upgrade()` и `downgrade()` для управления схемой БД.
+
+---
+
+## 📊 Схема базы данных
+
+### Таблицы:
+
+| Таблица | Описание |
+|---------|----------|
+| `users` | Пользователи системы (email, хешированный пароль, имя) |
+| `transactions` | Финансовые операции (доход/расход с категорией и датой) |
+| `budgets` | Лимиты расходов по категориям (по месяцам и годам) |
+| `tokens` | JWT-токены для сессий пользователей |
+| `alembic_version` | Служебная таблица для отслеживания миграций |
+
+### Связи:
+- `users` → `transactions` (один пользователь имеет много транзакций)
+- `users` → `budgets` (один пользователь имеет много бюджетов)
+- `users` → `tokens` (один пользователь имеет много токенов)

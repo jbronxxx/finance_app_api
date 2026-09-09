@@ -7,7 +7,12 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.models import User
-from app.schemas.schemas import TransactionCreate, TransactionResponse
+from app.schemas.schemas import (
+    ApiResponse,
+    BaseResponse,
+    TransactionCreate,
+    TransactionResponse,
+)
 from app.services.auth_service import get_current_user
 from app.services.transaction_service import TransactionService
 
@@ -16,7 +21,7 @@ router = APIRouter()
 
 @router.post(
     "/",
-    response_model=TransactionResponse,
+    response_model=ApiResponse[TransactionResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Добавить новую транзакцию",
 )
@@ -33,15 +38,16 @@ async def create_transaction(
         current_user (User): Текущий аутентифицированный пользователь.
 
     Возвращает:
-        TransactionResponse: Сохраненная транзакция с присвоенным ID и временной меткой.
+        ApiResponse[TransactionResponse]: Сохраненная транзакция с присвоенным ID и временной меткой.
     """
     service = TransactionService(db)
-    return service.create(current_user.id, payload)
+    transaction = service.create(current_user.id, payload)
+    return {"status": "success", "data": transaction}
 
 
 @router.get(
     "/",
-    response_model=list[TransactionResponse],
+    response_model=ApiResponse[list[TransactionResponse]],
     summary="Получить список транзакций",
 )
 async def list_transactions(
@@ -55,15 +61,16 @@ async def list_transactions(
         current_user (User): Текущий аутентифицированный пользователь.
 
     Возвращает:
-        list[TransactionResponse]: Список всех транзакций пользователя, отсортированный по дате.
+        ApiResponse[list[TransactionResponse]]: Список всех транзакций пользователя, отсортированный по дате.
     """
     service = TransactionService(db)
-    return service.get_all(current_user.id)
+    transactions = service.get_all(current_user.id)
+    return {"status": "success", "data": transactions}
 
 
 @router.delete(
     "/{transaction_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=BaseResponse,
     summary="Удалить транзакцию",
 )
 async def delete_transaction(
@@ -80,3 +87,4 @@ async def delete_transaction(
     """
     service = TransactionService(db)
     service.delete(current_user.id, transaction_id)
+    return {"status": "success", "message": "Transaction deleted successfully"}

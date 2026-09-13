@@ -24,6 +24,8 @@ bearer_scheme = HTTPBearer()
 class AuthService:
     """Класс бизнес-логики для регистрации и входа пользователей."""
 
+    bearer_scheme = HTTPBearer()
+
     def __init__(self, db: Session):
         """Инициализация сервиса с сессией базы данных.
 
@@ -86,14 +88,15 @@ class AuthService:
         logger.info(f"Пользователь успешно вошел в систему: {user.email}")
         return TokenResponse(access_token=token)
 
-    async def logout(self, user_id: uuid.UUID) -> None:
+    def logout(self, user_id: uuid.UUID, token_string: str) -> None:
         """Выйти из системы, удаляя токен из базы данных.
 
         Аргументы:
             user_id (uuid.UUID): Идентификатор пользователя.
+            token_string (str): Строка токена для деактивации.
             db (Session): Сессия базы данных.
         """
-        self._deactivate_token(user_id)
+        self._deactivate_token(user_id, token_string)
 
     def _create_token(self, user_id: str) -> str:
         """Сгенерировать подписанный JWT-токен доступа для пользователя.
@@ -123,20 +126,27 @@ class AuthService:
                 detail="Ошибка при создании токена",
             )
 
-    def _deactivate_token(self, user_id: uuid.UUID) -> None:
+    def _deactivate_token(self, user_id: uuid.UUID, token_string: str) -> None:
         """Деактивировать токен (например, при выходе пользователя).
 
         Аргументы:
             user_id (uuid.UUID): Идентификатор пользователя, чей токен нужно деактивировать.
+            token_string (str): Строка токена для деактивации.
         """
 
-        user_token = self.db.query(Token).filter(Token.user_id == user_id, Token.status == "active").first()
+        user_token = self.db.query(Token).filter(Token.user_id == user_id, Token.token == token_string).first()
 
         if user_token:
             logger.debug(f"Деактивация токена для пользователя {user_id}")
             user_token.status = "revoked"
             self.db.commit()
             logger.info(f"Токен успешно деактивирован для пользователя {user_id}")
+        else:
+            logger.warning(f"Попытка деактивации несуществующего токена для пользователя {user_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Токен не найден для деактивации",
+            )
 
 
 def get_current_user(
@@ -159,6 +169,7 @@ def get_current_user(
         HTTPException (401): Если токен невалиден, истек или пользователь не найден.
     """
     token = credentials.credentials
+
     try:
         payload = jwt.decode(token, config.secret_key, algorithms=[config.algorithm])
         user_id = payload.get("sub")
@@ -170,6 +181,7 @@ def get_current_user(
         )
 
     db_token = db.query(Token).filter(Token.token == token, Token.status == "active").first()
+
     if not db_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -184,11 +196,13 @@ def get_current_user(
         )
 
     user = db.query(User).filter(User.id == user_id).first()
+
     if not user:
         logger.warning(f"Пользователь с ID {user_id} не найден в базе данных")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Пользователь не найден",
         )
+
     logger.info(f"Текущий пользователь: {user.email}")
     return user

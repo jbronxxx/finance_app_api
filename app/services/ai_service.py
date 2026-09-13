@@ -39,13 +39,9 @@ class AIService:
             InsightResponse: Объект со списком рекомендаций и датой их генерации.
         """
         # Если API ключ не задан или остался плейсхолдер — возвращаем заглушку
-        is_placeholder = not config.anthropic_api_key or config.anthropic_api_key.startswith(
-            "sk-ant-your-key"
-        )
+        is_placeholder = not config.anthropic_api_key or config.anthropic_api_key.startswith("sk-ant-your-key")
         if is_placeholder:
-            logger.warning(
-                "ANTHROPIC_API_KEY is not set or is a placeholder, " "returning stub insights"
-            )
+            logger.warning("ANTHROPIC_API_KEY is not set or is a placeholder, " "returning stub insights")
             return InsightResponse(
                 insights=[
                     "Подключи Anthropic API для персональных инсайтов.",

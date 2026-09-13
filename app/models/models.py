@@ -57,12 +57,35 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Связи с другими сущностями
-    transactions: Mapped[list["Transaction"]] = relationship(
-        back_populates="user", cascade="all, delete-orphan"
-    )
-    budgets: Mapped[list["Budget"]] = relationship(
-        back_populates="user", cascade="all, delete-orphan"
-    )
+    transactions: Mapped[list["Transaction"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    budgets: Mapped[list["Budget"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    tokens: Mapped[list["Token"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+
+class Token(Base):
+    """ORM-модель для хранения токенов пользователей.
+
+    Таблица: tokens
+
+    Поля:
+        id (uuid.UUID): Уникальный идентификатор токена (Primary Key).
+        user_id (uuid.UUID): Внешний ключ на владельца токена (users.id).
+        token (str): JWT-токен.
+        created_at (datetime): Дата и время создания токена.
+        user (User): Связанный объект пользователя.
+    """
+
+    __tablename__ = "tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    token: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="active")  # Статус токена (active, revoked, expired)
+
+    # Связь с пользователем
+    user: Mapped["User"] = relationship(back_populates="tokens")
 
 
 class Transaction(Base):

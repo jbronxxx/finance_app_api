@@ -7,6 +7,9 @@ from sqlalchemy.orm import Session
 
 from app.models.models import Budget, Transaction, TransactionType
 from app.schemas.schemas import BudgetCreate, BudgetResponse
+from logger.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class BudgetService:
@@ -40,11 +43,10 @@ class BudgetService:
         self.db.add(budget)
         self.db.commit()
         self.db.refresh(budget)
+        logger.info(f"Создан новый бюджет: {budget}")
         return self._enrich(budget, user_id)
 
-    def get_all(
-        self, user_id: uuid.UUID, month: int | None, year: int | None
-    ) -> list[BudgetResponse]:
+    def get_all(self, user_id: uuid.UUID, month: int | None, year: int | None) -> list[BudgetResponse]:
         """Получить список всех бюджетов пользователя с фильтрацией по месяцу и году.
 
         Аргументы:
@@ -61,6 +63,7 @@ class BudgetService:
         if year:
             query = query.filter(Budget.year == year)
         budgets = query.all()
+        logger.info(f"Получено {len(budgets)} бюджетов для пользователя {user_id} с фильтром месяц={month}, год={year}")
         return [self._enrich(b, user_id) for b in budgets]
 
     def _enrich(self, budget: Budget, user_id: uuid.UUID) -> BudgetResponse:
@@ -88,6 +91,7 @@ class BudgetService:
             .scalar()
             or 0.0
         )
+        logger.info(f"Расчет расходов для бюджета {budget.id}: потрачено={spent}, лимит={budget.limit_amount}")
         return BudgetResponse(
             id=budget.id,
             category=budget.category,

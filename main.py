@@ -6,13 +6,13 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException
 
-from app.database import Base, engine
-from app.models import (  # noqa: F401 - гарантирует регистрацию моделей в Base.metadata
-    models,
-)
-from app.routers import auth, budgets, insights, transactions
+from app.routers import auth, budgets, insights, sync, transactions
+from app.schemas.schemas import ErrorResponse
 from logger.logger import get_logger
 
 logger = get_logger(__name__)
@@ -26,18 +26,8 @@ async def lifespan(app_instance: FastAPI):
 
     Аргументы:
         app_instance (FastAPI): Экземпляр веб-приложения FastAPI.
-
-    Исключения:
-        Exception: Если при автоматическом создании таблиц в БД возникла ошибка.
     """
     logger.info("Starting Finance App API")
-    try:
-        logger.info("Checking and initializing database tables...")
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables initialized successfully")
-    except Exception as e:
-        logger.error(f"Error initializing database tables: {e}")
-        raise
     yield
     logger.info("Stopping Finance App API")
 
@@ -49,11 +39,63 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Обработчик HTTP исключений с единообразным форматом ответа."""
+    error_response = ErrorResponse(
+        status="error",
+        error="HTTPException",
+        message=exc.detail,
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=error_response.model_dump(),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Обработчик ошибок валидации с единообразным форматом ответа."""
+    errors_dict = {}
+    for error in exc.errors():
+        field = str(error["loc"][-1]) if error["loc"] else "unknown"
+        msg = error.get("msg", "Неверное значение")
+        errors_dict[field] = msg
+
+    error_response = ErrorResponse(
+        status="error",
+        error="ValidationError",
+        message="Ошибка валидации входных данных",
+        details={"fields": errors_dict},
+    )
+    return JSONResponse(
+        status_code=422,
+        content=error_response.model_dump(),
+    )
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Обработчик неожиданных исключений с единообразным форматом ответа."""
+    logger.error(f"Неожиданная ошибка: {str(exc)}", exc_info=True)
+    error_response = ErrorResponse(
+        status="error",
+        error="InternalServerError",
+        message="Внутренняя ошибка сервера",
+    )
+    return JSONResponse(
+        status_code=500,
+        content=error_response.model_dump(),
+    )
+
+
 # Подключение маршрутизаторов модулей
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(transactions.router, prefix="/api/v1/transactions", tags=["transactions"])
 app.include_router(budgets.router, prefix="/api/v1/budgets", tags=["budgets"])
 app.include_router(insights.router, prefix="/api/v1/insights", tags=["insights"])
+app.include_router(sync.router, prefix="/api/v1/sync", tags=["sync"])
 
 
 @app.get("/health", summary="Проверка работоспособности сервиса")

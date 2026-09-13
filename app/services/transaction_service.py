@@ -8,6 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.models.models import Transaction
 from app.schemas.schemas import TransactionCreate
+from logger.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class TransactionService:
@@ -42,6 +45,7 @@ class TransactionService:
         self.db.add(tx)
         self.db.commit()
         self.db.refresh(tx)
+        logger.info(f"Создана новая транзакция: {tx}")
         return tx
 
     def get_all(self, user_id: uuid.UUID) -> list[Transaction]:
@@ -53,12 +57,8 @@ class TransactionService:
         Возвращает:
             list[Transaction]: Список транзакций пользователя.
         """
-        return (
-            self.db.query(Transaction)
-            .filter(Transaction.user_id == user_id)
-            .order_by(Transaction.date.desc())
-            .all()
-        )
+        logger.info(f"Получение всех транзакций для пользователя {user_id}")
+        return self.db.query(Transaction).filter(Transaction.user_id == user_id).order_by(Transaction.date.desc()).all()
 
     def delete(self, user_id: uuid.UUID, transaction_id: uuid.UUID) -> None:
         """Удалить транзакцию по ее идентификатору.
@@ -70,15 +70,13 @@ class TransactionService:
         Исключения:
             HTTPException (404): Если транзакция с указанным ID не найдена у данного пользователя.
         """
-        tx = (
-            self.db.query(Transaction)
-            .filter(Transaction.id == transaction_id, Transaction.user_id == user_id)
-            .first()
-        )
+        tx = self.db.query(Transaction).filter(Transaction.id == transaction_id, Transaction.user_id == user_id).first()
         if not tx:
+            logger.warning(f"Попытка удаления несуществующей транзакции {transaction_id} для пользователя {user_id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Транзакция не найдена",
             )
         self.db.delete(tx)
         self.db.commit()
+        logger.info(f"Транзакция удалена: {tx.id}")

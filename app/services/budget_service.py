@@ -2,10 +2,11 @@
 
 import uuid
 
+from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.models import Budget, Transaction, TransactionType
+from app.models.models import Budget, Category, Transaction, TransactionType
 from app.schemas.schemas import BudgetCreate, BudgetResponse
 from logger.logger import get_logger
 
@@ -24,7 +25,7 @@ class BudgetService:
         self.db = db
 
     def create(self, user_id: uuid.UUID, payload: BudgetCreate) -> BudgetResponse:
-        """Создать новый бюджет (лимит расходов) по категории на указанный период.
+        """Создать новый бюджет или обновить существующий лимит расходов по категории на указанный период.
 
         Аргументы:
             user_id (uuid.UUID): Уникальный ID пользователя.
@@ -33,6 +34,24 @@ class BudgetService:
         Возвращает:
             BudgetResponse: Обогащенная модель бюджета с расчетом потраченной суммы и остатка.
         """
+        existing_budget = (
+            self.db.query(Budget)
+            .filter(
+                Budget.user_id == user_id,
+                Budget.category == payload.category,
+                Budget.month == payload.month,
+                Budget.year == payload.year,
+            )
+            .first()
+        )
+
+        if existing_budget:
+            logger.info(f"Обновление существующего бюджета {existing_budget.id} для пользователя {user_id}")
+            existing_budget.limit_amount = payload.limit_amount
+            self.db.commit()
+            self.db.refresh(existing_budget)
+            return self._enrich(existing_budget, user_id)
+
         budget = Budget(
             user_id=user_id,
             category=payload.category,
@@ -44,6 +63,25 @@ class BudgetService:
         self.db.commit()
         self.db.refresh(budget)
         logger.info(f"Создан новый бюджет: {budget}")
+        return self._enrich(budget, user_id)
+
+    def get_by_id(self, user_id: uuid.UUID, budget_id: uuid.UUID) -> BudgetResponse:
+        """Получить бюджет по его идентификатору.
+
+        Аргументы:
+            user_id (uuid.UUID): Уникальный ID пользователя.
+            budget_id (uuid.UUID): Уникальный ID бюджета.
+
+        Возвращает:
+            BudgetResponse: Модель бюджета с расчетом потраченной суммы и остатка.
+        """
+        budget = self.db.query(Budget).filter(Budget.id == budget_id, Budget.user_id == user_id).first()
+        if not budget:
+            logger.warning(f"Бюджет {budget_id} не найден для пользователя {user_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Бюджет не найден",
+            )
         return self._enrich(budget, user_id)
 
     def get_all(self, user_id: uuid.UUID, month: int | None, year: int | None) -> list[BudgetResponse]:
@@ -66,10 +104,60 @@ class BudgetService:
         logger.info(f"Получено {len(budgets)} бюджетов для пользователя {user_id} с фильтром месяц={month}, год={year}")
         return [self._enrich(b, user_id) for b in budgets]
 
+    def delete(self, user_id: uuid.UUID, budget_id: uuid.UUID) -> None:
+        """Удалить бюджет по его идентификатору.
+
+        Аргументы:
+            user_id (uuid.UUID): Уникальный ID пользователя (для проверки прав доступа).
+            budget_id (uuid.UUID): ID удаляемого бюджета.
+
+        Исключения:
+            HTTPException (404): Если бюджет с указанным ID не найден у данного пользователя.
+        """
+        budget = self.db.query(Budget).filter(Budget.id == budget_id, Budget.user_id == user_id).first()
+        if not budget:
+            logger.warning(f"Попытка удаления несуществующего бюджета {budget_id} для пользователя {user_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Бюджет не найден",
+            )
+        self.db.delete(budget)
+        self.db.commit()
+        logger.info(f"Бюджет удален: {budget_id}")
+
+    def delete_by_category_period(self, user_id: uuid.UUID, category: Category, month: int, year: int) -> bool:
+        """Удалить бюджет по категории, месяцу и году.
+
+        Аргументы:
+            user_id (uuid.UUID): Уникальный ID пользователя.
+            category (Category): Категория бюджета.
+            month (int): Месяц.
+            year (int): Год.
+
+        Возвращает:
+            bool: True, если бюджет найден и удален, иначе False.
+        """
+        budget = (
+            self.db.query(Budget)
+            .filter(
+                Budget.user_id == user_id,
+                Budget.category == category,
+                Budget.month == month,
+                Budget.year == year,
+            )
+            .first()
+        )
+        if not budget:
+            return False
+        self.db.delete(budget)
+        self.db.commit()
+        logger.info(f"Бюджет удален по категории и периоду: {category} ({month}/{year})")
+        return True
+
     def _enrich(self, budget: Budget, user_id: uuid.UUID) -> BudgetResponse:
         """Обогатить объект бюджета агрегированными данными о фактических расходах.
 
-        Вычисляет сумму всех расходных транзакций пользователя по данной категории
+        Вычислить сумму всех расходных транзакций пользователя по данной категории
         за указанный месяц и год, а также остаток от лимита.
 
         Аргументы:

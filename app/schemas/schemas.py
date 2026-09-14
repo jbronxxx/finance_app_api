@@ -251,10 +251,20 @@ class TransactionSyncItem(BaseModel):
 class BudgetSyncItem(BaseModel):
     """Схема отдельного бюджета при пакетной синхронизации."""
 
+    id: Optional[uuid.UUID] = Field(default=None, description="ID бюджета (если уже создан на сервере)")
     category: Category = Field(..., description="Категория")
-    limit_amount: float = Field(..., gt=0, description="Лимит")
+    limit_amount: float = Field(default=0.0, ge=0, description="Лимит бюджета")
     month: int = Field(..., ge=1, le=12, description="Месяц")
     year: int = Field(..., ge=2000, le=2100, description="Год")
+    is_deleted: bool = Field(default=False, description="Флаг удаления бюджета на клиенте")
+    deleted: Optional[bool] = Field(default=None, description="Альтернативный флаг удаления бюджета")
+
+    @property
+    def check_deleted(self) -> bool:
+        """Проверить флаг удаления."""
+        if self.deleted is not None:
+            return self.deleted
+        return self.is_deleted
 
 
 class SyncPayload(BaseModel):
@@ -262,6 +272,10 @@ class SyncPayload(BaseModel):
 
     transactions: List[TransactionSyncItem] = Field(default_factory=list, description="Список транзакций")
     budgets: List[BudgetSyncItem] = Field(default_factory=list, description="Список бюджетов")
+    deleted_budget_ids: List[uuid.UUID] = Field(default_factory=list, description="Список ID бюджетов для удаления")
+    deleted_budgets: List[BudgetSyncItem] = Field(
+        default_factory=list, description="Список объектов бюджетов для удаления по категории и периоду"
+    )
 
 
 class SyncResponse(BaseModel):

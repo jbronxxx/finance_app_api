@@ -1,31 +1,19 @@
 """Эндпоинты управления бюджетами и лимитами расходов по категориям."""
 
-from fastapi import APIRouter, Depends, Query, status
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.models import User
-from app.schemas.schemas import ApiResponse, BudgetCreate, BudgetResponse
+from app.models.models import Category, User
+from app.schemas.schemas import ApiResponse, BaseResponse, BudgetCreate, BudgetResponse
 from app.services.auth_service import get_current_user
 from app.services.budget_service import BudgetService
 
 router = APIRouter()
 
 
-# TODO: Добавить проверку на существование бюджета по категории,
-#  месяцу и году перед созданием нового бюджета (POST /budgets)
-# TODO: Добавить эндпоинт для обновления бюджета по категории
-#  (PATCH /budgets/{budget_id})
-# TODO: Добавить эндпоинт для удаления бюджета по категории
-#  (DELETE /budgets/{budget_id})
-# TODO: Добавить эндпоинт для получения бюджета по категории
-#  (GET /budgets/{budget_id})
-# TODO: Добавить эндпоинт для получения бюджета по категории и месяцу
-#  (GET /budgets/{category_id}/{month}/{year})
-# TODO: Добавить эндпоинт для получения бюджета по категории и году
-#  (GET /budgets/{category_id}/{year})
-# TODO: Добавить эндпоинт для получения бюджета по категории, месяцу и году
-#  (GET /budgets/{category_id}/{month}/{year})
 @router.post(
     "/",
     response_model=ApiResponse[BudgetResponse],
@@ -39,13 +27,8 @@ async def create_budget(
 ):
     """Установить лимит бюджета по определенной категории на месяц и год.
 
-    Аргументы:
-        payload (BudgetCreate): Параметры бюджета (категория, сумма лимита, месяц, год).
-        db (Session): Сессия базы данных (инъекция через Depends).
-        current_user (User): Текущий аутентифицированный пользователь.
-
-    Возвращает:
-        ApiResponse[BudgetResponse]: Созданный бюджет с рассчитанным остатком и израсходованной суммой.
+    Если бюджет для выбранной категории на этот период уже существует,
+    его лимит обновляется.
     """
     service = BudgetService(db)
     budget = service.create(current_user.id, payload)
@@ -63,17 +46,62 @@ async def list_budgets(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Получить список бюджетов с автоматическим расчетом израсходованных средств и остатка лимита.
-
-    Аргументы:
-        month (int | None): Номер месяца для фильтрации (опционально).
-        year (int | None): Год для фильтрации (опционально).
-        db (Session): Сессия базы данных (инъекция через Depends).
-        current_user (User): Текущий аутентифицированный пользователь.
-
-    Возвращает:
-        ApiResponse[list[BudgetResponse]]: Список бюджетов с актуальными данными по расходам.
-    """
+    """Получить список бюджетов с автоматическим расчетом израсходованных средств и остатка лимита."""
     service = BudgetService(db)
     budgets = service.get_all(current_user.id, month=month, year=year)
     return {"status": "success", "data": budgets}
+
+
+@router.get(
+    "/{budget_id}",
+    response_model=ApiResponse[BudgetResponse],
+    summary="Получить бюджет по ID",
+)
+async def get_budget(
+    budget_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Получить информацию о бюджете по его уникальному ID."""
+    service = BudgetService(db)
+    budget = service.get_by_id(current_user.id, budget_id)
+    return {"status": "success", "data": budget}
+
+
+@router.delete(
+    "/{budget_id}",
+    response_model=BaseResponse,
+    summary="Удалить бюджет по ID",
+)
+async def delete_budget(
+    budget_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Удалить запись бюджета по её уникальному идентификатору."""
+    service = BudgetService(db)
+    service.delete(current_user.id, budget_id)
+    return {"status": "success", "message": "Бюджет успешно удален"}
+
+
+@router.delete(
+    "/category/{category}/{month}/{year}",
+    response_model=BaseResponse,
+    summary="Удалить бюджет по категории, месяцу и году",
+)
+async def delete_budget_by_category_period(
+    category: Category,
+    month: int,
+    year: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Удалить бюджет по названию категории, месяцу и году."""
+    service = BudgetService(db)
+    deleted = service.delete_by_category_period(current_user.id, category, month, year)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Бюджет не найден",
+        )
+    return {"status": "success", "message": "Бюджет успешно удален"}

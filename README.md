@@ -9,7 +9,7 @@ FastAPI бэкенд для персонального финансового т
 * **Веб-фреймворк:** FastAPI + Uvicorn
 * **База данных:** PostgreSQL 16
 * **ORM & Миграции:** SQLAlchemy 2.0 + Alembic
-* **Безопасность & Авторизация:** JWT (python-jose) + bcrypt
+* **Безопасность & Авторизация:** JWT Access & Refresh токенов с ротацией (`python-jose`) + хеширование паролей (`bcrypt`)
 * **AI Интеграция:** Anthropic Claude API (модель `claude-haiku-4-5`)
 * **Контейнеризация:** Docker & Docker Compose
 * **Тестирование:** Pytest + HTTPX / TestClient
@@ -48,6 +48,8 @@ POSTGRES_PASSWORD=your_postgres_password
 POSTGRES_DB=your_postgres_db
 DATABASE_URL=postgresql://your_postgres_user:your_postgres_password@db:5432/your_postgres_db
 SECRET_KEY=change-me-in-production-use-long-random-string
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+REFRESH_TOKEN_EXPIRE_DAYS=7
 ANTHROPIC_API_KEY=sk-ant-api03-...
 ```
 > [!NOTE]
@@ -120,6 +122,12 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 * **ReDoc документация:** [http://localhost:8000/redoc](http://localhost:8000/redoc)
 * **Проверка статуса сервиса:** [http://localhost:8000/health](http://localhost:8000/health)
 
+### Основные API-эндпоинты аутентификации:
+- `POST /api/v1/auth/register` — регистрация пользователя
+- `POST /api/v1/auth/login` — аутентификация и получение пары `access_token` и `refresh_token`
+- `POST /api/v1/auth/refresh` — бессрочное/бесшовное обновление `access_token` с помощью `refresh_token` (механизм Refresh Token Rotation)
+- `POST /api/v1/auth/logout` — выход из системы и отзыв активного токена
+- `GET /api/v1/auth/me` — получение данных текущего авторизованного пользователя
 
 ---
 
@@ -192,12 +200,12 @@ alembic downgrade -1
 | Таблица | Описание |
 |---------|----------|
 | `users` | Пользователи системы (email, хешированный пароль, имя) |
+| `tokens` | JWT access и refresh токены сессий пользователей с отслеживанием статуса (`active`, `revoked`, `expired`) |
 | `transactions` | Финансовые операции (доход/расход с категорией и датой) |
-| `budgets` | Лимиты расходов по категориям (по месяцам и годам) |
-| `tokens` | JWT-токены для сессий пользователей |
+| `budgets` | Лимиты расходов по категориям (по месяцаи и годам) |
 | `alembic_version` | Служебная таблица для отслеживания миграций |
 
 ### Связи:
 - `users` → `transactions` (один пользователь имеет много транзакций)
 - `users` → `budgets` (один пользователь имеет много бюджетов)
-- `users` → `tokens` (один пользователь имеет много токенов)
+- `users` → `tokens` (один пользователь имеет много токенов access/refresh)

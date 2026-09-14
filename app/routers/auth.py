@@ -9,6 +9,7 @@ from app.models.models import User
 from app.schemas.schemas import (
     ApiResponse,
     BaseResponse,
+    RefreshTokenRequest,
     TokenResponse,
     UserLogin,
     UserRegister,
@@ -25,40 +26,61 @@ router = APIRouter()
     status_code=status.HTTP_201_CREATED,
     summary="Регистрация нового пользователя",
 )
-async def register(payload: UserRegister, db: Session = Depends(get_db)) -> ApiResponse:
+async def register(payload: UserRegister, db: Session = Depends(get_db)) -> dict[str, str | User]:
     """Зарегистрировать нового пользователя в системе.
 
     Аргументы:
         payload (UserRegister): Данные для регистрации (email, пароль, имя).
-        db (Session): Сессия базы данных (инъекция через Depends).
+        db (Session): Сессия базы данных.
 
     Возвращает:
-        ApiResponse[UserResponse]: Созданный профиль пользователя (без пароля).
+        ApiResponse[UserResponse]: Созданный профиль пользователя.
     """
     service = AuthService(db)
     user = service.register(payload)
     return {"status": "success", "data": user}
 
 
-# TODO: Добавить обработку истекшего токена при попытке доступа к защищенным эндпоинтам
 @router.post(
     "/login",
     response_model=ApiResponse[TokenResponse],
-    summary="Вход в систему и получение токена",
+    summary="Вход в систему и получение токенов",
 )
-async def login(payload: UserLogin, db: Session = Depends(get_db)) -> TokenResponse:
-    """Аутентификация пользователя по email и паролю с возвратом JWT-токена.
+async def login(payload: UserLogin, db: Session = Depends(get_db)) -> dict[str, str | TokenResponse]:
+    """Аутентификация пользователя по email и паролю с возвратом JWT access и refresh токенов.
 
     Аргументы:
         payload (UserLogin): Учетные данные пользователя (email, пароль).
-        db (Session): Сессия базы данных (инъекция через Depends).
+        db (Session): Сессия базы данных.
 
     Возвращает:
-        ApiResponse[TokenResponse]: JWT токен доступа (Bearer token).
+        ApiResponse[TokenResponse]: Пара токенов access_token и refresh_token.
     """
     service = AuthService(db)
-    token = service.login(payload)
-    return {"status": "success", "data": token}
+    tokens = service.login(payload)
+    return {"status": "success", "data": tokens}
+
+
+@router.post(
+    "/refresh",
+    response_model=ApiResponse[TokenResponse],
+    summary="Обновление access_token с использованием refresh_token",
+)
+async def refresh_tokens(payload: RefreshTokenRequest, db: Session = Depends(get_db)) -> dict[str, str | TokenResponse]:
+    """Обновить access_token и получить новую пару токенов по действующему refresh_token.
+
+    Используется клиентом (фронтендом) при получении 401 HTTP-статуса для бесшовного обновления сессии.
+
+    Аргументы:
+        payload (RefreshTokenRequest): Передаваемый refresh_token.
+        db (Session): Сессия базы данных.
+
+    Возвращает:
+        ApiResponse[TokenResponse]: Обновленные access_token и refresh_token.
+    """
+    service = AuthService(db)
+    tokens = service.refresh_tokens(payload.refresh_token)
+    return {"status": "success", "data": tokens}
 
 
 @router.post(
@@ -70,21 +92,17 @@ async def logout(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     credentials: HTTPBearer = Depends(AuthService.bearer_scheme),
-) -> BaseResponse:
-    """Выйти из системы, удаляя токен из базы данных.
+) -> dict[str, str]:
+    """Выйти из системы, деактивируя токен в базе данных.
 
     Аргументы:
-        db (Session): Сессия базы данных (инъекция через Depends).
+        db (Session): Сессия базы данных.
         current_user (User): Текущий авторизованный пользователь.
+        credentials (HTTPBearer): Токен из заголовка Authorization.
     """
     service = AuthService(db)
     service.logout(current_user.id, credentials.credentials)
     return {"status": "success", "message": "Successfully logged out"}
-
-
-# @router.post(
-#     "/refresh_token",
-#     response
 
 
 @router.get(
@@ -93,8 +111,7 @@ async def logout(
     summary="Получение информации о текущем пользователе",
 )
 async def auth_me(
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> ApiResponse:
+) -> dict[str, str | User]:
     """Получить информацию о текущем пользователе."""
     return {"status": "success", "data": current_user}

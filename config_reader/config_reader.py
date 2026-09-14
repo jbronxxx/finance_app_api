@@ -25,7 +25,8 @@ class Config:
         db_url (str): Строка подключения (DSN) к базе данных PostgreSQL.
         secret_key (str): Секретный ключ для подписи JWT-токенов.
         algorithm (str): Алгоритм шифрования JWT (например, HS256).
-        access_token_expire_minutes (int): Время жизни JWT токена в минутах.
+        access_token_expire_minutes (int): Время жизни JWT access токена в минутах.
+        refresh_token_expire_days (int): Время жизни JWT refresh токена в днях.
         anthropic_api_key (str): Ключ API для интеграции с Anthropic Claude.
         ai_model (str): Название используемой модели Anthropic Claude.
     """
@@ -42,6 +43,7 @@ class Config:
     secret_key: str
     algorithm: str
     access_token_expire_minutes: int
+    refresh_token_expire_days: int
 
     # Настройки Anthropic AI
     anthropic_api_key: str
@@ -74,16 +76,19 @@ def load_config(path: str = "app_config.yaml") -> Config:
         else:
             db_url = raw["db"]["url"]
 
+    auth_raw = raw.get("auth", {})
+
     return Config(
         debug=bool(os.getenv("APP_DEBUG", raw["app"]["debug"])),
         host=os.getenv("APP_HOST", raw["app"]["host"]),
         port=int(os.getenv("APP_PORT", raw["app"]["port"])),
         db_url=db_url,
-        secret_key=os.getenv("SECRET_KEY", raw["auth"]["secret_key"]),
-        algorithm=os.getenv("AUTH_ALGORITHM", raw["auth"]["algorithm"]),
+        secret_key=os.getenv("SECRET_KEY", auth_raw.get("secret_key")),
+        algorithm=os.getenv("AUTH_ALGORITHM", auth_raw.get("algorithm", "HS256")),
         access_token_expire_minutes=int(
-            os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", raw["auth"]["access_token_expire_minutes"])
+            os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", auth_raw.get("access_token_expire_minutes", 60))
         ),
+        refresh_token_expire_days=int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", auth_raw.get("refresh_token_expire_days", 7))),
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
         ai_model=os.getenv("AI_MODEL", raw["ai"]["model"]),
     )

@@ -66,8 +66,7 @@ class UserBase(BaseModel):
     """Базовая схема пользователя с общими полями.
 
     Атрибуты:
-        email (EmailStr): Адрес электронной почты пользователя.
-        name (str): Имя пользователя.
+        user_id (uuid.UUID): Уникальный идентификатор пользователя.
     """
 
     user_id: uuid.UUID = Field(..., description="ID пользователя")
@@ -78,7 +77,7 @@ class UserRegister(BaseModel):
 
     Атрибуты:
         email (EmailStr): Адрес электронной почты пользователя.
-        password (str): Пароль пользователя (открытый текст при передаче).
+        password (str): Пароль пользователя.
         name (str): Имя пользователя.
     """
 
@@ -99,15 +98,27 @@ class UserLogin(BaseModel):
     password: str = Field(..., description="Пароль пользователя")
 
 
-class TokenResponse(BaseModel):
-    """Схема ответа с JWT-токеном доступа.
+class RefreshTokenRequest(BaseModel):
+    """Схема запроса на обновление access-токена с использованием refresh-токена.
 
     Атрибуты:
-        access_token (str): Сгенерированный JWT-токен.
+        refresh_token (str): Действительный JWT refresh-токен.
+    """
+
+    refresh_token: str = Field(..., description="JWT refresh токен для обновления access токена")
+
+
+class TokenResponse(BaseModel):
+    """Схема ответа с JWT-токенами доступа и обновления.
+
+    Атрибуты:
+        access_token (str): Сгенерированный JWT-токен доступа.
+        refresh_token (str): JWT-токен для обновления access-токена.
         token_type (str): Тип токена (по умолчанию "bearer").
     """
 
     access_token: str = Field(..., description="JWT токен доступа")
+    refresh_token: str = Field(..., description="JWT токен для обновления access токена")
     token_type: str = Field(default="bearer", description="Тип токена авторизации")
 
 
@@ -142,7 +153,7 @@ class TransactionCreate(BaseModel):
         description (str): Описание операции.
         category (Category): Категория транзакции.
         type (TransactionType): Тип транзакции (income / expense).
-        date (datetime | None): Дата и время операции (если не указано — текущее время).
+        date (datetime | None): Дата и время операции.
     """
 
     amount: float = Field(..., gt=0, description="Сумма операции (должна быть больше 0)")
@@ -188,7 +199,7 @@ class BudgetCreate(BaseModel):
         category (Category): Категория расходов.
         limit_amount (float): Устанавливаемый лимит суммы.
         month (int): Месяц (1-12).
-        year (int): Год (например, 2026).
+        year (int): Год.
     """
 
     category: Category = Field(..., description="Категория расходов")
@@ -222,34 +233,42 @@ class BudgetResponse(BaseModel):
 
 
 # ============================================================================
-# Схемы синзронизации данных оффлайн пользователя с сервером
+# Схемы синхронизации данных оффлайн пользователя с сервером
 # ============================================================================
 
 
 class TransactionSyncItem(BaseModel):
-    local_id: Optional[int] = None
-    type: TransactionType
-    category: Category
-    amount: float
-    date: datetime
-    description: str
+    """Схема отдельной транзакции при пакетной синхронизации."""
+
+    local_id: Optional[int] = Field(default=None, description="Локальный ID на клиенте")
+    type: TransactionType = Field(..., description="Тип операции")
+    category: Category = Field(..., description="Категория")
+    amount: float = Field(..., gt=0, description="Сумма")
+    date: datetime = Field(..., description="Дата и время")
+    description: str = Field(..., description="Описание")
 
 
 class BudgetSyncItem(BaseModel):
-    category: Category
-    limit_amount: float
-    month: int
-    year: int
+    """Схема отдельного бюджета при пакетной синхронизации."""
+
+    category: Category = Field(..., description="Категория")
+    limit_amount: float = Field(..., gt=0, description="Лимит")
+    month: int = Field(..., ge=1, le=12, description="Месяц")
+    year: int = Field(..., ge=2000, le=2100, description="Год")
 
 
 class SyncPayload(BaseModel):
-    transactions: List[TransactionSyncItem]
-    budgets: List[BudgetSyncItem]
+    """Схема пакета данных для синхронизации."""
+
+    transactions: List[TransactionSyncItem] = Field(default_factory=list, description="Список транзакций")
+    budgets: List[BudgetSyncItem] = Field(default_factory=list, description="Список бюджетов")
 
 
 class SyncResponse(BaseModel):
-    synced_transactions: List[TransactionResponse]
-    synced_budgets: List[BudgetResponse]
+    """Схема ответа на синхронизацию."""
+
+    synced_transactions: List[TransactionResponse] = Field(..., description="Синхронизированные транзакции")
+    synced_budgets: List[BudgetResponse] = Field(..., description="Синхронизированные бюджеты")
 
 
 # ============================================================================

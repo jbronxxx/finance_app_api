@@ -1,9 +1,11 @@
 """Сервис управления финансовыми транзакциями (доходы и расходы)."""
 
+import hashlib
 import uuid
 from datetime import datetime
 
 from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.models import Transaction
@@ -48,17 +50,12 @@ class TransactionService:
         logger.info(f"Создана новая транзакция: {tx}")
         return tx
 
-    def get_all(self, user_id: uuid.UUID) -> list[Transaction]:
-        """Получить все транзакции пользователя, отсортированные по дате (от новых к старым).
-
-        Аргументы:
-            user_id (uuid.UUID): Уникальный ID пользователя.
-
-        Возвращает:
-            list[Transaction]: Список транзакций пользователя.
-        """
-        logger.info(f"Получение всех транзакций для пользователя {user_id}")
-        return self.db.query(Transaction).filter(Transaction.user_id == user_id).order_by(Transaction.date.desc()).all()
+    def get_all(self, user_id: uuid.UUID, since: datetime | None = None) -> list[Transaction]:
+        """Получение транзакций с поддержкой фильтрации по времени создания."""
+        query = self.db.query(Transaction).filter(Transaction.user_id == user_id)
+        if since:
+            query = query.filter(Transaction.created_at >= since)
+        return query.order_by(Transaction.date.desc()).all()
 
     def delete(self, user_id: uuid.UUID, transaction_id: uuid.UUID) -> None:
         """Удалить транзакцию по ее идентификатору.
@@ -80,3 +77,16 @@ class TransactionService:
         self.db.delete(tx)
         self.db.commit()
         logger.info(f"Транзакция удалена: {tx.id}")
+
+    def get_etag(self, user_id: uuid.UUID, since: datetime | None = None) -> str:
+        """Быстрый расчет ETag без выгрузки всех объектов."""
+        query = self.db.query(func.count(Transaction.id), func.max(Transaction.created_at)).filter(
+            Transaction.user_id == user_id
+        )
+
+        if since:
+            query = query.filter(Transaction.created_at >= since)
+
+        count, max_created = query.first()
+        raw_str = f"{user_id}:{count}:{max_created.isoformat() if max_created else ''}"
+        return hashlib.md5(raw_str.encode()).hexdigest()

@@ -1,5 +1,6 @@
 """Сервис управления бюджетами и расчет фактически израсходованных средств."""
 
+import hashlib
 import uuid
 
 from fastapi import HTTPException, status
@@ -153,6 +154,19 @@ class BudgetService:
         self.db.commit()
         logger.info(f"Бюджет удален по категории и периоду: {category} ({month}/{year})")
         return True
+
+    def get_etag(self, user_id: uuid.UUID, month: int | None = None, year: int | None = None) -> str:
+        """Быстрый расчет ETag без выгрузки всех объектов бюджетов."""
+        query = self.db.query(func.count(Budget.id), func.max(Budget.created_at)).filter(Budget.user_id == user_id)
+
+        if month:
+            query = query.filter(Budget.month == month)
+        if year:
+            query = query.filter(Budget.year == year)
+
+        count, max_created = query.first()
+        raw_str = f"{user_id}:{count}:{max_created.isoformat() if max_created else ''}"
+        return hashlib.md5(raw_str.encode()).hexdigest()
 
     def _enrich(self, budget: Budget, user_id: uuid.UUID) -> BudgetResponse:
         """Обогатить объект бюджета агрегированными данными о фактических расходах.

@@ -2,7 +2,7 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -43,12 +43,23 @@ async def create_budget(
 async def list_budgets(
     month: int | None = Query(default=None, ge=1, le=12, description="Фильтр по номеру месяца (1-12)"),
     year: int | None = Query(default=None, ge=2000, le=2100, description="Фильтр по году"),
+    if_none_match: str | None = Header(None, alias="If-None-Match"),
+    response: Response = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Получить список бюджетов с автоматическим расчетом израсходованных средств и остатка лимита."""
     service = BudgetService(db)
+
+    current_etag = service.get_etag(current_user.id, month=month, year=year)
+
+    if if_none_match and if_none_match.strip('"') == current_etag:
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED)
+
     budgets = service.get_all(current_user.id, month=month, year=year)
+    if response:
+        response.headers["ETag"] = f'"{current_etag}"'
+
     return {"status": "success", "data": budgets}
 
 

@@ -1,8 +1,9 @@
 """Эндпоинты управления финансовыми транзакциями (доходы и расходы)."""
 
 import uuid
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Header, Response, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -51,20 +52,23 @@ async def create_transaction(
     summary="Получить список транзакций",
 )
 async def list_transactions(
+    since: datetime | None = None,
+    if_none_match: str | None = Header(None, alias="If-None-Match"),
+    response: Response = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Получить всю историю доходов и расходов текущего пользователя.
-
-    Аргументы:
-        db (Session): Сессия базы данных (инъекция через Depends).
-        current_user (User): Текущий аутентифицированный пользователь.
-
-    Возвращает:
-        ApiResponse[list[TransactionResponse]]: Список всех транзакций пользователя, отсортированный по дате.
-    """
     service = TransactionService(db)
-    transactions = service.get_all(current_user.id)
+
+    current_etag = service.get_etag(current_user.id, since=since)
+
+    if if_none_match and if_none_match.strip('"') == current_etag:
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED)
+
+    transactions = service.get_all(current_user.id, since=since)
+    if response:
+        response.headers["ETag"] = f'"{current_etag}"'
+
     return {"status": "success", "data": transactions}
 
 

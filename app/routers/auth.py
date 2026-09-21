@@ -9,6 +9,7 @@ from app.models.models import User
 from app.schemas.schemas import (
     ApiResponse,
     BaseResponse,
+    ErrorResponse,
     RefreshTokenRequest,
     TokenResponse,
     UserLogin,
@@ -17,7 +18,16 @@ from app.schemas.schemas import (
 )
 from app.services.auth_service import AuthService, get_current_user
 
-router = APIRouter()
+router = APIRouter(
+    responses={
+        400: {"model": ErrorResponse, "description": "Ошибка бизнес-логики (например, USER_ALREADY_EXISTS)"},
+        401: {"model": ErrorResponse, "description": "Ошибка авторизации (INVALID_CREDENTIALS, EXPIRED_TOKEN)"},
+        403: {"model": ErrorResponse, "description": "Доступ запрещен"},
+        404: {"model": ErrorResponse, "description": "Ресурс не найден"},
+        422: {"model": ErrorResponse, "description": "Ошибка валидации данных"},
+        500: {"model": ErrorResponse, "description": "Внутренняя ошибка сервера"},
+    }
+)
 
 
 @router.post(

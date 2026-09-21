@@ -4,9 +4,9 @@
 
 API использует единообразный формат ответов для всех эндпоинтов:
 
-- **Успешные ответы**: `ApiResponse[T]` - обертка с данными результата
-- **Ошибочные ответы**: `ErrorResponse` - обертка с информацией об ошибке
-- **Простые ответы**: `BaseResponse` - для операций без значимых данных
+- **Успешные ответы**: `ApiResponse[T]` — обертка с данными результата (`data`)
+- **Ошибочные ответы**: `ErrorResponse` — фиксированный контракт с машиночитаемым строковым кодом (`code`), понятным описанием (`message`) и опциональными деталями (`details`)
+- **Простые ответы**: `BaseResponse` — для операций без значимых возвращаемых данных (например, logout, delete)
 
 ---
 
@@ -17,7 +17,7 @@ API использует единообразный формат ответов 
 ```json
 {
   "status": "success",
-  "data": { /* Здесь ваши данные */ },
+  "data": { /* Данные ответа */ },
   "message": "Опциональное сообщение"
 }
 ```
@@ -55,71 +55,113 @@ API использует единообразный формат ответов 
 }
 ```
 
-#### Получение списка транзакций (GET /api/v1/transactions/)
-
-```json
-{
-  "status": "success",
-  "data": [
-    { /* Транзакция 1 */ },
-    { /* Транзакция 2 */ }
-  ]
-}
-```
-
 ---
 
-## Ошибочные ответы
+## Ошибочные ответы (Единый контракт)
 
 ### Формат: `ErrorResponse`
 
+Любая ошибка сервера (400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found, 422 ValidationError, 500 Internal Server Error) возвращается в единой структуре:
+
 ```json
 {
   "status": "error",
-  "error": "КодОшибки",
-  "message": "Человекочитаемое описание ошибки",
-  "details": { /* Опциональные детали */ }
+  "code": "BUDGET_LIMIT_EXCEEDED",
+  "message": "Превышен лимит бюджета для данной категории",
+  "details": { /* Опциональные структурированные данные */ }
 }
 ```
 
-### Примеры:
+### Поля контракта ошибки:
+- **`status`** (*строка, всегда `"error"`*): Сигнализирует о неуспешном результате.
+- **`code`** (*строка*): Уникальный машиночитаемый код ошибки (SCREAMING_SNAKE_CASE). Позволяет клиенту реализовывать точную логику и локализацию интерфейса без парсинга строк.
+- **`message`** (*строка*): Понятное человекочитаемое описание проблемы на русском языке.
+- **`details`** (*объект, опционально*): Дополнительные параметры (например, список невалидных полей, ID сущности и т.д.).
 
-#### Ошибка валидации (422)
+---
+
+## Реестр кодов ошибок (`ErrorCode`)
+
+| Код ошибки | HTTP-код | Описание |
+| :--- | :--- | :--- |
+| `VALIDATION_ERROR` | 422 | Ошибка валидации параметров запроса Pydantic (содержит `details.fields`) |
+| `INVALID_CREDENTIALS` | 401 | Неверный email или пароль при логине |
+| `USER_ALREADY_EXISTS` | 400 | Пользователь с таким email уже зарегистрирован |
+| `USER_NOT_FOUND` | 401 / 404 | Пользователь не найден |
+| `EXPIRED_TOKEN` | 401 | Истек срок действия JWT access или refresh токена |
+| `INVALID_TOKEN` | 401 | Некорректная подпись, структура или тип JWT токена |
+| `TOKEN_REVOKED` | 401 | Токен был отозван (например, после logout или ротации) |
+| `TOKEN_NOT_FOUND` | 404 | Токен не найден в БД для деактивации |
+| `TRANSACTION_NOT_FOUND` | 404 | Транзакция с указанным ID не найдена |
+| `BUDGET_NOT_FOUND` | 404 | Бюджет с указанным ID/категорией не найден |
+| `BUDGET_LIMIT_EXCEEDED` | 400 | Превышен установленный лимит бюджета по категории |
+| `SYNC_FAILED` | 400 / 500 | Ошибка при выполнении пакетной офлайн-синхронизации |
+| `BAD_REQUEST` | 400 | Общая ошибка некорректного запроса |
+| `UNAUTHORIZED` | 401 | Требуется авторизация |
+| `FORBIDDEN` | 403 | Отсутствует токен доступа или доступ к ресурсу запрещен |
+| `NOT_FOUND` | 404 | Запрашиваемый ресурс или URL не найден |
+| `INTERNAL_SERVER_ERROR` | 500 | Непредвиденная внутренняя ошибка сервера |
+
+---
+
+### Примеры ошибок:
+
+#### 1. Ошибка валидации формы (422 Unprocessable Entity)
 
 ```json
 {
   "status": "error",
-  "error": "ValidationError",
+  "code": "VALIDATION_ERROR",
   "message": "Ошибка валидации входных данных",
   "details": {
-    "errors": [
-      {
-        "loc": ["body", "email"],
-        "msg": "invalid email format",
-        "type": "value_error.email"
-      }
-    ]
+    "fields": {
+      "email": "value is not a valid email address",
+      "password": "String should have at least 6 characters"
+    }
   }
 }
 ```
 
-#### Не найдено (404)
+#### 2. Неверные учетные данные (401 Unauthorized)
 
 ```json
 {
   "status": "error",
-  "error": "HTTPException",
-  "message": "Транзакция не найдена"
+  "code": "INVALID_CREDENTIALS",
+  "message": "Неверный email или пароль"
 }
 ```
 
-#### Внутренняя ошибка сервера (500)
+#### 3. Истекший токен (401 Unauthorized)
 
 ```json
 {
   "status": "error",
-  "error": "InternalServerError",
-  "message": "Внутренняя ошибка сервера"
+  "code": "EXPIRED_TOKEN",
+  "message": "Срок действия токена доступа истек"
+}
+```
+
+#### 4. Ресурс не найден (404 Not Found)
+
+```json
+{
+  "status": "error",
+  "code": "TRANSACTION_NOT_FOUND",
+  "message": "Транзакция не найдена",
+  "details": {
+    "transaction_id": "550e8400-e29b-41d4-a716-446655440001"
+  }
+}
+```
+
+#### 5. Превышение лимита бюджета (400 Bad Request)
+
+```json
+{
+  "status": "error",
+  "code": "BUDGET_LIMIT_EXCEEDED",
+  "message": "Превышен лимит бюджета для данной категории"
 }
 ```
 
@@ -129,7 +171,7 @@ API использует единообразный формат ответов 
 
 ### Формат: `BaseResponse`
 
-Используется для операций которые не возвращают значимые данные:
+Используется для операций, которые не возвращают сущностей:
 
 ```json
 {
@@ -138,106 +180,31 @@ API использует единообразный формат ответов 
 }
 ```
 
-### Примеры:
-
-#### Выход из системы (POST /api/v1/auth/logout)
-
-```json
-{
-  "status": "success",
-  "message": "Successfully logged out"
-}
-```
-
-#### Удаление транзакции (DELETE /api/v1/transactions/{transaction_id})
-
-```json
-{
-  "status": "success",
-  "message": "Transaction deleted successfully"
-}
-```
-
 ---
 
-## Использование в роутерах
+## Использование в коде бэкенда
 
-### Пример 1: Возврат данных
-
-```python
-from fastapi import APIRouter
-from app.schemas.schemas import ApiResponse, UserResponse
-
-router = APIRouter()
-
-@router.post("/register", response_model=ApiResponse[UserResponse])
-async def register(payload: UserRegister, db: Session = Depends(get_db)):
-    service = AuthService(db)
-    user = service.register(payload)
-    return {"status": "success", "data": user}
-```
-
-### Пример 2: Возврат списка
+Вместо прямых `raise HTTPException(...)` используйте специализированные исключения из `app.exceptions`:
 
 ```python
-@router.get("/", response_model=ApiResponse[list[TransactionResponse]])
-async def list_transactions(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    service = TransactionService(db)
-    transactions = service.get_all(current_user.id)
-    return {"status": "success", "data": transactions}
-```
+from app.exceptions import BadRequestException, NotFoundException, UnauthorizedException, ErrorCode
 
-### Пример 3: Простой ответ без данных
+# Сущность не найдена
+raise NotFoundException(
+    code=ErrorCode.TRANSACTION_NOT_FOUND,
+    message="Транзакция не найдена",
+    details={"transaction_id": str(transaction_id)},
+)
 
-```python
-from app.schemas.schemas import BaseResponse
+# Ошибка авторизации
+raise UnauthorizedException(
+    code=ErrorCode.INVALID_CREDENTIALS,
+    message="Неверный email или пароль",
+)
 
-@router.post("/logout", response_model=BaseResponse)
-async def logout(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    service = AuthService(db)
-    await service.logout(current_user.id)
-    return {"status": "success", "message": "Successfully logged out"}
-```
-
----
-
-## Автоматическая обработка ошибок
-
-Все ошибки обрабатываются автоматически через exception handlers в `main.py`:
-
-1. **HTTPException** → `ErrorResponse` с кодом статуса HTTP
-2. **RequestValidationError** → `ErrorResponse` с деталями валидации (422)
-3. **Неожиданные исключения** → `ErrorResponse` (500)
-
-Разработчикам не нужно вручную форматировать ошибки - они обрабатываются автоматически.
-
----
-
-## Типы данных
-
-### ApiResponse
-
-```python
-class ApiResponse(BaseModel, Generic[T]):
-    status: str = "success"
-    data: T
-    message: Optional[str] = None
-```
-
-### ErrorResponse
-
-```python
-class ErrorResponse(BaseModel):
-    status: str = "error"
-    error: str
-    message: str
-    details: Optional[dict] = None
-```
-
-### BaseResponse
-
-```python
-class BaseResponse(BaseModel):
-    status: str = "success"
-    message: Optional[str] = None
+# Ошибка бизнес-правил
+raise BadRequestException(
+    code=ErrorCode.USER_ALREADY_EXISTS,
+    message="Пользователь с таким email уже зарегистрирован",
+)
 ```

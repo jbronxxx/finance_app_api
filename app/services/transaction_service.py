@@ -4,10 +4,10 @@ import hashlib
 import uuid
 from datetime import datetime
 
-from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.exceptions import ErrorCode, NotFoundException
 from app.models.models import Transaction
 from app.schemas.schemas import TransactionCreate
 from logger.logger import get_logger
@@ -65,14 +65,15 @@ class TransactionService:
             transaction_id (uuid.UUID): ID удаляемой транзакции.
 
         Исключения:
-            HTTPException (404): Если транзакция с указанным ID не найдена у данного пользователя.
+            NotFoundException (404): Если транзакция с указанным ID не найдена у данного пользователя.
         """
         tx = self.db.query(Transaction).filter(Transaction.id == transaction_id, Transaction.user_id == user_id).first()
         if not tx:
             logger.warning(f"Попытка удаления несуществующей транзакции {transaction_id} для пользователя {user_id}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Транзакция не найдена",
+            raise NotFoundException(
+                code=ErrorCode.TRANSACTION_NOT_FOUND,
+                message="Транзакция не найдена",
+                details={"transaction_id": str(transaction_id)},
             )
         self.db.delete(tx)
         self.db.commit()

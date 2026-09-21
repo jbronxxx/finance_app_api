@@ -11,13 +11,23 @@ from app.models.models import User
 from app.schemas.schemas import (
     ApiResponse,
     BaseResponse,
+    ErrorResponse,
     TransactionCreate,
     TransactionResponse,
 )
 from app.services.auth_service import get_current_user
 from app.services.transaction_service import TransactionService
 
-router = APIRouter()
+router = APIRouter(
+    responses={
+        400: {"model": ErrorResponse, "description": "Ошибка бизнес-логики"},
+        401: {"model": ErrorResponse, "description": "Требуется авторизация"},
+        403: {"model": ErrorResponse, "description": "Доступ запрещен"},
+        404: {"model": ErrorResponse, "description": "Ресурс не найден"},
+        422: {"model": ErrorResponse, "description": "Ошибка валидации входных данных"},
+        500: {"model": ErrorResponse, "description": "Внутренняя ошибка сервера"},
+    }
+)
 
 
 @router.post(

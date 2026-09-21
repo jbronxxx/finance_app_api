@@ -5,12 +5,19 @@ from datetime import datetime, timedelta
 from typing import Union
 
 import bcrypt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.exceptions import (
+    AppException,
+    BadRequestException,
+    ErrorCode,
+    NotFoundException,
+    UnauthorizedException,
+)
 from app.models.models import Token, User
 from app.schemas.schemas import TokenResponse, UserLogin, UserRegister
 from config_reader.config_reader import config
@@ -45,14 +52,14 @@ class AuthService:
             User: Созданный объект пользователя из базы данных.
 
         Исключения:
-            HTTPException (400): Если пользователь с указанным email уже существует.
+            BadRequestException (400): Если пользователь с указанным email уже существует.
         """
         existing = self.db.query(User).filter(User.email == payload.email).first()
         if existing:
             logger.warning(f"Попытка регистрации с уже зарегистрированным email: {payload.email}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Пользователь с таким email уже зарегистрирован",
+            raise BadRequestException(
+                code=ErrorCode.USER_ALREADY_EXISTS,
+                message="Пользователь с таким email уже зарегистрирован",
             )
 
         hashed = bcrypt.hashpw(payload.password.encode(), bcrypt.gensalt()).decode()
@@ -73,14 +80,14 @@ class AuthService:
             TokenResponse: Объект, содержащий сгенерированные access и refresh токены.
 
         Исключения:
-            HTTPException (422): Если email не найден или пароль не совпадает.
+            UnauthorizedException (401): Если email не найден или пароль не совпадает.
         """
         user = self.db.query(User).filter(User.email == payload.email).first()
         if not user or not bcrypt.checkpw(payload.password.encode(), user.hashed_password.encode()):
             logger.warning(f"Неуспешная попытка входа для email: {payload.email}")
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Неверный email или пароль",
+            raise UnauthorizedException(
+                code=ErrorCode.INVALID_CREDENTIALS,
+                message="Неверный email или пароль",
             )
 
         access_token = self.create_access_token(user.id)
@@ -136,9 +143,10 @@ class AuthService:
         except Exception as e:
             self.db.rollback()
             logger.error(f"Ошибка сохранения access-токена в БД для пользователя {user_id_str}: {e}")
-            raise HTTPException(
+            raise AppException(
+                code=ErrorCode.INTERNAL_SERVER_ERROR,
+                message="Ошибка при создании токена доступа",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Ошибка при создании токена доступа",
             )
 
     def create_refresh_token(self, user_id: Union[str, uuid.UUID]) -> str:
@@ -176,9 +184,10 @@ class AuthService:
         except Exception as e:
             self.db.rollback()
             logger.error(f"Ошибка сохранения refresh-токена в БД для пользователя {user_id_str}: {e}")
-            raise HTTPException(
+            raise AppException(
+                code=ErrorCode.INTERNAL_SERVER_ERROR,
+                message="Ошибка при создании refresh токена",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Ошибка при создании refresh токена",
             )
 
     def refresh_tokens(self, refresh_token_string: str) -> TokenResponse:
@@ -191,7 +200,7 @@ class AuthService:
             TokenResponse: Новые access_token и refresh_token.
 
         Исключения:
-            HTTPException (401): Если токен недействителен, истек или отозван.
+            UnauthorizedException (401): Если токен недействителен, истек или отозван.
         """
         try:
             payload = jwt.decode(refresh_token_string, config.secret_key, algorithms=[config.algorithm])
@@ -200,55 +209,55 @@ class AuthService:
 
             if token_type and token_type != "refresh":
                 logger.warning("Попытка использования токена доступа вместо refresh-токена при обновлении")
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Недействительный тип токена. Ожидается refresh token",
+                raise UnauthorizedException(
+                    code=ErrorCode.INVALID_TOKEN,
+                    message="Недействительный тип токена. Ожидается refresh token",
                 )
 
             if not user_id:
                 logger.warning("Refresh-токен не содержит идентификатор пользователя (sub)")
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Недействительный refresh токен",
+                raise UnauthorizedException(
+                    code=ErrorCode.INVALID_TOKEN,
+                    message="Недействительный refresh токен",
                 )
         except JWTError:
             logger.warning("Недействительная подпись или структура JWT refresh-токена")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Недействительный или истекший refresh токен",
+            raise UnauthorizedException(
+                code=ErrorCode.INVALID_TOKEN,
+                message="Недействительный или истекший refresh токен",
             )
 
         db_token = self.db.query(Token).filter(Token.token == refresh_token_string, Token.status == "active").first()
 
         if not db_token:
             logger.warning("Refresh-токен отсутствует в базе данных либо неактивен")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Refresh токен недействителен или отозван",
+            raise UnauthorizedException(
+                code=ErrorCode.TOKEN_REVOKED,
+                message="Refresh токен недействителен или отозван",
             )
 
         if db_token.expires_at < datetime.utcnow():
             db_token.status = "expired"
             self.db.commit()
             logger.warning(f"Истек срок действия refresh-токена в базе данных для пользователя {db_token.user_id}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Срок действия refresh токена истек",
+            raise UnauthorizedException(
+                code=ErrorCode.EXPIRED_TOKEN,
+                message="Срок действия refresh токена истек",
             )
 
         if str(db_token.user_id) != str(user_id):
             logger.warning(f"Несоответствие идентификатора пользователя в токене ({user_id}) и БД ({db_token.user_id})")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Недействительный refresh токен",
+            raise UnauthorizedException(
+                code=ErrorCode.INVALID_TOKEN,
+                message="Недействительный refresh токен",
             )
 
         user = self.db.query(User).filter(User.id == db_token.user_id).first()
         if not user:
             logger.warning(f"Пользователь с ID {db_token.user_id} не найден при ротации токенов")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Пользователь не найден",
+            raise UnauthorizedException(
+                code=ErrorCode.USER_NOT_FOUND,
+                message="Пользователь не найден",
             )
 
         # Ротация refresh-токена: деактивируем старый refresh_token
@@ -286,9 +295,9 @@ class AuthService:
             logger.info(f"Токен успешно отзывен при выходе пользователя {user_id}")
         else:
             logger.warning(f"Попытка отзыва несуществующего токена для пользователя {user_id}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Токен не найден для деактивации",
+            raise NotFoundException(
+                code=ErrorCode.TOKEN_NOT_FOUND,
+                message="Токен не найден для деактивации",
             )
 
 
@@ -309,7 +318,7 @@ def get_current_user(
         User: Сущность авторизованного пользователя.
 
     Исключения:
-        HTTPException (401): Если токен невалиден, истек или пользователь не найден.
+        UnauthorizedException (401): Если токен невалиден, истек или пользователь не найден.
     """
     token = credentials.credentials
 
@@ -320,48 +329,48 @@ def get_current_user(
 
         if token_type and token_type != "access":
             logger.warning("Попытка аутентификации с использованием не-access токена")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Недействительный тип токена. Ожидается access token",
+            raise UnauthorizedException(
+                code=ErrorCode.INVALID_TOKEN,
+                message="Недействительный тип токена. Ожидается access token",
             )
     except JWTError:
         logger.warning("Ошибка валидации подписи JWT access-токена")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Недействительный или истекший токен авторизации",
+        raise UnauthorizedException(
+            code=ErrorCode.INVALID_TOKEN,
+            message="Недействительный или истекший токен авторизации",
         )
 
     db_token = db.query(Token).filter(Token.token == token, Token.status == "active").first()
 
     if not db_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Токен отозван или недействителен",
+        raise UnauthorizedException(
+            code=ErrorCode.TOKEN_REVOKED,
+            message="Токен отозван или недействителен",
         )
 
     if db_token.expires_at < datetime.utcnow():
         db_token.status = "expired"
         db.commit()
         logger.warning(f"Истек срок действия access-токена в базе данных для пользователя {db_token.user_id}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Срок действия токена доступа истек",
+        raise UnauthorizedException(
+            code=ErrorCode.EXPIRED_TOKEN,
+            message="Срок действия токена доступа истек",
         )
 
     if not user_id:
         logger.warning("JWT access-токен не содержит идентификатор пользователя (sub)")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Недействительный токен авторизации",
+        raise UnauthorizedException(
+            code=ErrorCode.INVALID_TOKEN,
+            message="Недействительный токен авторизации",
         )
 
     user = db.query(User).filter(User.id == user_id).first()
 
     if not user:
         logger.warning(f"Пользователь с ID {user_id} из токена не найден в базы данных")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Пользователь не найден",
+        raise UnauthorizedException(
+            code=ErrorCode.USER_NOT_FOUND,
+            message="Пользователь не найден",
         )
 
     logger.debug(f"Аутентификация успешна для пользователя: {user.email}")

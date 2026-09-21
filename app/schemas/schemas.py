@@ -34,13 +34,16 @@ class ErrorResponse(BaseModel):
 
     Атрибуты:
         status: Статус ответа ('error').
-        error: Код ошибки или название.
-        message: Описание ошибки.
+        code: Уникальный строковый код ошибки (например, 'BUDGET_LIMIT_EXCEEDED').
+        message: Понятное описание ошибки для пользователя.
+        details: Опциональные структурированные детали ошибки.
     """
 
+    model_config = ConfigDict(from_attributes=True)
+
     status: str = Field(default="error", description="Статус ответа")
-    error: str = Field(..., description="Код или название ошибки")
-    message: str = Field(..., description="Описание ошибки")
+    code: str = Field(..., description="Машиночитаемый строковый код ошибки")
+    message: str = Field(..., description="Понятное описание ошибки")
     details: Optional[dict] = Field(default=None, description="Дополнительные детали ошибки")
 
 

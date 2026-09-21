@@ -5,11 +5,17 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.models import User
-from app.schemas.schemas import ApiResponse, InsightResponse
+from app.schemas.schemas import ApiResponse, ErrorResponse, InsightResponse
 from app.services.ai_service import AIService
 from app.services.auth_service import get_current_user
 
-router = APIRouter()
+router = APIRouter(
+    responses={
+        401: {"model": ErrorResponse, "description": "Требуется авторизация"},
+        403: {"model": ErrorResponse, "description": "Доступ запрещен"},
+        500: {"model": ErrorResponse, "description": "Внутренняя ошибка сервера"},
+    }
+)
 
 
 @router.get(

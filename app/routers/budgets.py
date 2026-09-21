@@ -2,16 +2,32 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.exceptions import ErrorCode, NotFoundException
 from app.models.models import Category, User
-from app.schemas.schemas import ApiResponse, BaseResponse, BudgetCreate, BudgetResponse
+from app.schemas.schemas import (
+    ApiResponse,
+    BaseResponse,
+    BudgetCreate,
+    BudgetResponse,
+    ErrorResponse,
+)
 from app.services.auth_service import get_current_user
 from app.services.budget_service import BudgetService
 
-router = APIRouter()
+router = APIRouter(
+    responses={
+        400: {"model": ErrorResponse, "description": "Ошибка бизнес-логики"},
+        401: {"model": ErrorResponse, "description": "Требуется авторизация"},
+        403: {"model": ErrorResponse, "description": "Доступ запрещен"},
+        404: {"model": ErrorResponse, "description": "Ресурс не найден"},
+        422: {"model": ErrorResponse, "description": "Ошибка валидации входных данных"},
+        500: {"model": ErrorResponse, "description": "Внутренняя ошибка сервера"},
+    }
+)
 
 
 @router.post(
@@ -111,8 +127,9 @@ async def delete_budget_by_category_period(
     service = BudgetService(db)
     deleted = service.delete_by_category_period(current_user.id, category, month, year)
     if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Бюджет не найден",
+        raise NotFoundException(
+            code=ErrorCode.BUDGET_NOT_FOUND,
+            message="Бюджет не найден",
+            details={"category": str(category), "month": month, "year": year},
         )
     return {"status": "success", "message": "Бюджет успешно удален"}

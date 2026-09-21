@@ -3,10 +3,10 @@
 import hashlib
 import uuid
 
-from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.exceptions import ErrorCode, NotFoundException
 from app.models.models import Budget, Category, Transaction, TransactionType
 from app.schemas.schemas import BudgetCreate, BudgetResponse
 from logger.logger import get_logger
@@ -79,9 +79,10 @@ class BudgetService:
         budget = self.db.query(Budget).filter(Budget.id == budget_id, Budget.user_id == user_id).first()
         if not budget:
             logger.warning(f"Бюджет {budget_id} не найден для пользователя {user_id}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Бюджет не найден",
+            raise NotFoundException(
+                code=ErrorCode.BUDGET_NOT_FOUND,
+                message="Бюджет не найден",
+                details={"budget_id": str(budget_id)},
             )
         return self._enrich(budget, user_id)
 
@@ -113,14 +114,15 @@ class BudgetService:
             budget_id (uuid.UUID): ID удаляемого бюджета.
 
         Исключения:
-            HTTPException (404): Если бюджет с указанным ID не найден у данного пользователя.
+            NotFoundException (404): Если бюджет с указанным ID не найден у данного пользователя.
         """
         budget = self.db.query(Budget).filter(Budget.id == budget_id, Budget.user_id == user_id).first()
         if not budget:
             logger.warning(f"Попытка удаления несуществующего бюджета {budget_id} для пользователя {user_id}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Бюджет не найден",
+            raise NotFoundException(
+                code=ErrorCode.BUDGET_NOT_FOUND,
+                message="Бюджет не найден",
+                details={"budget_id": str(budget_id)},
             )
         self.db.delete(budget)
         self.db.commit()

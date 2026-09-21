@@ -1,19 +1,30 @@
+"""Эндпоинт пакетной синхронизации офлайн данных транзакций и бюджетов."""
+
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.exceptions import AppException, BadRequestException, ErrorCode
 from app.models.models import Budget, Transaction, User
-from app.schemas.schemas import ApiResponse, SyncPayload, SyncResponse
+from app.schemas.schemas import ApiResponse, ErrorResponse, SyncPayload, SyncResponse
 from app.services.auth_service import get_current_user
 from app.services.budget_service import BudgetService
 from logger.logger import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(
+    responses={
+        400: {"model": ErrorResponse, "description": "Ошибка пакетной синхронизации (SYNC_FAILED)"},
+        401: {"model": ErrorResponse, "description": "Требуется авторизация"},
+        403: {"model": ErrorResponse, "description": "Доступ запрещен"},
+        422: {"model": ErrorResponse, "description": "Ошибка валидации входных данных"},
+        500: {"model": ErrorResponse, "description": "Внутренняя ошибка сервера при сохранении"},
+    }
+)
 
 
 @router.post(
@@ -144,9 +155,11 @@ async def sync_data(
             f"Ошибка базы данных при синхронизации пользователя {current_user.id}: {str(e)}",
             exc_info=True,
         )
-        raise HTTPException(
+        raise AppException(
+            code=ErrorCode.SYNC_FAILED,
+            message="Ошибка при сохранении данных в базу",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Ошибка при сохранении данных в базу",
+            details={"error": str(e)},
         )
     except Exception as e:
         db.rollback()
@@ -154,9 +167,9 @@ async def sync_data(
             f"Непредвиденная ошибка при синхронизации пользователя {current_user.id}: {str(e)}",
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Не удалось обработать запрос: {str(e)}",
+        raise BadRequestException(
+            code=ErrorCode.SYNC_FAILED,
+            message=f"Не удалось обработать запрос синхронизации: {str(e)}",
         )
 
     logger.info(f"Синхронизация успешно завершена для пользователя {current_user.id}")

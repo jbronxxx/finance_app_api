@@ -44,8 +44,7 @@ class AIService:
             logger.warning("ANTHROPIC_API_KEY is not set or is a placeholder, " "returning stub insights")
             return InsightResponse(
                 insights=[
-                    "Подключи Anthropic API для персональных инсайтов.",
-                    "Добавь валидный ANTHROPIC_API_KEY в .env файл.",
+                    "В разработке...",
                 ],
                 generated_at=datetime.utcnow(),
             )

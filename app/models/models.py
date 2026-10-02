@@ -3,10 +3,11 @@
 import enum
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from sqlalchemy import DateTime
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy import Float, ForeignKey, String
+from sqlalchemy import ForeignKey, Index, Numeric, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -96,7 +97,7 @@ class Transaction(Base):
     Поля:
         id (uuid.UUID): Уникальный идентификатор транзакции (Primary Key).
         user_id (uuid.UUID): Внешний ключ на владельца операции (users.id).
-        amount (float): Сумма операции.
+        amount (Decimal): Сумма операции.
         description (str): Описание / комментарий к операции.
         category (Category): Категория транзакции (Enum).
         type (TransactionType): Тип транзакции (income / expense).
@@ -106,10 +107,14 @@ class Transaction(Base):
     """
 
     __tablename__ = "transactions"
+    __table_args__ = (
+        Index("ix_transactions_user_id_date", "user_id", "date"),
+        Index("ix_transactions_user_id_created_at", "user_id", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
-    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(precision=12, scale=2), nullable=False)
     description: Mapped[str] = mapped_column(String(255), nullable=False)
     category: Mapped[Category] = mapped_column(SAEnum(Category), nullable=False)
     type: Mapped[TransactionType] = mapped_column(SAEnum(TransactionType), nullable=False)
@@ -129,7 +134,7 @@ class Budget(Base):
         id (uuid.UUID): Уникальный идентификатор бюджета (Primary Key).
         user_id (uuid.UUID): Внешний ключ на владельца бюджета (users.id).
         category (Category): Категория расходов, для которой установлен лимит.
-        limit_amount (float): Установленный лимит суммы на месяц.
+        limit_amount (Decimal): Установленный лимит суммы на месяц.
         month (int): Месяц действия бюджета (1-12).
         year (int): Год действия бюджета.
         created_at (datetime): Дата создания бюджета.
@@ -137,11 +142,12 @@ class Budget(Base):
     """
 
     __tablename__ = "budgets"
+    __table_args__ = (UniqueConstraint("user_id", "category", "month", "year", name="uq_budget_user_cat_period"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     category: Mapped[Category] = mapped_column(SAEnum(Category), nullable=False)
-    limit_amount: Mapped[float] = mapped_column(Float, nullable=False)
+    limit_amount: Mapped[Decimal] = mapped_column(Numeric(precision=12, scale=2), nullable=False)
     month: Mapped[int] = mapped_column(nullable=False)
     year: Mapped[int] = mapped_column(nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

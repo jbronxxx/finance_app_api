@@ -2,6 +2,7 @@
 
 import hashlib
 import uuid
+from decimal import Decimal
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -183,7 +184,7 @@ class BudgetService:
         Возвращает:
             BudgetResponse: Ответ со значениями spent (потрачено) и remaining (остаток).
         """
-        spent = (
+        raw_spent = (
             self.db.query(func.sum(Transaction.amount))
             .filter(
                 Transaction.user_id == user_id,
@@ -193,15 +194,18 @@ class BudgetService:
                 func.extract("year", Transaction.date) == budget.year,
             )
             .scalar()
-            or 0.0
         )
-        logger.info(f"Расчет расходов для бюджета {budget.id}: потрачено={spent}, лимит={budget.limit_amount}")
+        spent = Decimal(str(raw_spent)) if raw_spent is not None else Decimal("0.00")
+        limit_amount = Decimal(str(budget.limit_amount)) if budget.limit_amount is not None else Decimal("0.00")
+        remaining = max(Decimal("0.00"), limit_amount - spent)
+
+        logger.info(f"Расчет расходов для бюджета {budget.id}: потрачено={spent}, лимит={limit_amount}")
         return BudgetResponse(
             id=budget.id,
             category=budget.category,
-            limit_amount=budget.limit_amount,
+            limit_amount=limit_amount,
             month=budget.month,
             year=budget.year,
             spent=spent,
-            remaining=max(0.0, budget.limit_amount - spent),
+            remaining=remaining,
         )

@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
@@ -63,15 +64,15 @@ class TestSyncEndpointIntegration:
         synced_txs = data["synced_transactions"]
         assert len(synced_txs) == 2
         assert synced_txs[0]["id"] == tx1_id
-        assert synced_txs[0]["amount"] == 750.0
+        assert Decimal(str(synced_txs[0]["amount"])) == Decimal("750.0")
 
         # Проверяем обогащенные бюджеты в ответе (spent должен учесть расход tx1)
         synced_budgets = data["synced_budgets"]
         assert len(synced_budgets) == 1
         assert synced_budgets[0]["category"] == "food"
-        assert synced_budgets[0]["limit_amount"] == 15000.0
-        assert synced_budgets[0]["spent"] == 750.0
-        assert synced_budgets[0]["remaining"] == 14250.0
+        assert Decimal(str(synced_budgets[0]["limit_amount"])) == Decimal("15000.0")
+        assert Decimal(str(synced_budgets[0]["spent"])) == Decimal("750.0")
+        assert Decimal(str(synced_budgets[0]["remaining"])) == Decimal("14250.0")
 
         # Проверяем наличие записей в базе данных
         db_tx = db_session.query(Transaction).filter(Transaction.id == uuid.UUID(tx1_id)).first()

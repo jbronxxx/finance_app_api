@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import pytest
 from sqlalchemy.orm import Session
@@ -188,7 +189,7 @@ class TestBudgetEndpointsIntegration:
         assert create_res.status_code == 201
         budget_data = create_res.json()["data"]
         budget_id = budget_data["id"]
-        assert budget_data["limit_amount"] == 15000.0
+        assert Decimal(str(budget_data["limit_amount"])) == Decimal("15000.00")
 
         # 2. Get list with query params
         list_res = client.get("/api/v1/budgets/?month=10&year=2026", headers=auth_headers)

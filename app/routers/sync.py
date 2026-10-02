@@ -34,7 +34,7 @@ router = APIRouter(
     status_code=status.HTTP_200_OK,
     summary="Синхронизировать данные",
 )
-async def sync_data(
+def sync_data(
     payload: SyncPayload,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),

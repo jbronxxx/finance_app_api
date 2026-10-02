@@ -1,7 +1,7 @@
 """Сервис аутентификации, авторизации и управления пользователями."""
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Union
 
 import bcrypt
@@ -119,11 +119,12 @@ class AuthService:
         """
         user_id_str = str(user_id)
         user_uuid = uuid.UUID(user_id_str) if isinstance(user_id, str) else user_id
-        expire = datetime.utcnow() + timedelta(minutes=config.access_token_expire_minutes)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=config.access_token_expire_minutes)
         payload = {
             "sub": user_id_str,
             "type": "access",
             "exp": expire,
+            "jti": uuid.uuid4().hex,
         }
         logger.debug(f"Генерация access-токена для пользователя {user_id_str} (истекает: {expire})")
         token_str = jwt.encode(payload, config.secret_key, algorithm=config.algorithm)
@@ -160,11 +161,12 @@ class AuthService:
         """
         user_id_str = str(user_id)
         user_uuid = uuid.UUID(user_id_str) if isinstance(user_id, str) else user_id
-        expire = datetime.utcnow() + timedelta(days=config.refresh_token_expire_days)
+        expire = datetime.now(timezone.utc) + timedelta(days=config.refresh_token_expire_days)
         payload = {
             "sub": user_id_str,
             "type": "refresh",
             "exp": expire,
+            "jti": uuid.uuid4().hex,
         }
         logger.debug(f"Генерация refresh-токена для пользователя {user_id_str} (истекает: {expire})")
         refresh_token_str = jwt.encode(payload, config.secret_key, algorithm=config.algorithm)
@@ -236,7 +238,11 @@ class AuthService:
                 message="Refresh токен недействителен или отозван",
             )
 
-        if db_token.expires_at < datetime.utcnow():
+        token_expires_at = db_token.expires_at
+        if token_expires_at.tzinfo is None:
+            token_expires_at = token_expires_at.replace(tzinfo=timezone.utc)
+
+        if token_expires_at < datetime.now(timezone.utc):
             db_token.status = "expired"
             self.db.commit()
             logger.warning(f"Истек срок действия refresh-токена в базе данных для пользователя {db_token.user_id}")
@@ -245,14 +251,23 @@ class AuthService:
                 message="Срок действия refresh токена истек",
             )
 
-        if str(db_token.user_id) != str(user_id):
+        try:
+            user_uuid = uuid.UUID(str(user_id))
+        except (ValueError, TypeError):
+            logger.warning(f"Некорректный формат UUID в токене: {user_id}")
+            raise UnauthorizedException(
+                code=ErrorCode.INVALID_TOKEN,
+                message="Недействительный refresh токен",
+            )
+
+        if db_token.user_id != user_uuid:
             logger.warning(f"Несоответствие идентификатора пользователя в токене ({user_id}) и БД ({db_token.user_id})")
             raise UnauthorizedException(
                 code=ErrorCode.INVALID_TOKEN,
                 message="Недействительный refresh токен",
             )
 
-        user = self.db.query(User).filter(User.id == db_token.user_id).first()
+        user = self.db.query(User).filter(User.id == user_uuid).first()
         if not user:
             logger.warning(f"Пользователь с ID {db_token.user_id} не найден при ротации токенов")
             raise UnauthorizedException(
@@ -340,6 +355,22 @@ def get_current_user(
             message="Недействительный или истекший токен авторизации",
         )
 
+    if not user_id:
+        logger.warning("JWT access-токен не содержит идентификатор пользователя (sub)")
+        raise UnauthorizedException(
+            code=ErrorCode.INVALID_TOKEN,
+            message="Недействительный токен авторизации",
+        )
+
+    try:
+        user_uuid = uuid.UUID(str(user_id))
+    except (ValueError, TypeError):
+        logger.warning(f"Некорректный UUID в токене авторизации: {user_id}")
+        raise UnauthorizedException(
+            code=ErrorCode.INVALID_TOKEN,
+            message="Недействительный токен авторизации",
+        )
+
     db_token = db.query(Token).filter(Token.token == token, Token.status == "active").first()
 
     if not db_token:
@@ -348,7 +379,11 @@ def get_current_user(
             message="Токен отозван или недействителен",
         )
 
-    if db_token.expires_at < datetime.utcnow():
+    token_expires_at = db_token.expires_at
+    if token_expires_at.tzinfo is None:
+        token_expires_at = token_expires_at.replace(tzinfo=timezone.utc)
+
+    if token_expires_at < datetime.now(timezone.utc):
         db_token.status = "expired"
         db.commit()
         logger.warning(f"Истек срок действия access-токена в базе данных для пользователя {db_token.user_id}")
@@ -357,14 +392,7 @@ def get_current_user(
             message="Срок действия токена доступа истек",
         )
 
-    if not user_id:
-        logger.warning("JWT access-токен не содержит идентификатор пользователя (sub)")
-        raise UnauthorizedException(
-            code=ErrorCode.INVALID_TOKEN,
-            message="Недействительный токен авторизации",
-        )
-
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.id == user_uuid).first()
 
     if not user:
         logger.warning(f"Пользователь с ID {user_id} из токена не найден в базы данных")

@@ -36,7 +36,7 @@ router = APIRouter(
     status_code=status.HTTP_201_CREATED,
     summary="Регистрация нового пользователя",
 )
-async def register(payload: UserRegister, db: Session = Depends(get_db)) -> dict[str, str | User]:
+def register(payload: UserRegister, db: Session = Depends(get_db)) -> dict[str, str | User]:
     """Зарегистрировать нового пользователя в системе.
 
     Аргументы:
@@ -56,7 +56,7 @@ async def register(payload: UserRegister, db: Session = Depends(get_db)) -> dict
     response_model=ApiResponse[TokenResponse],
     summary="Вход в систему и получение токенов",
 )
-async def login(payload: UserLogin, db: Session = Depends(get_db)) -> dict[str, str | TokenResponse]:
+def login(payload: UserLogin, db: Session = Depends(get_db)) -> dict[str, str | TokenResponse]:
     """Аутентификация пользователя по email и паролю с возвратом JWT access и refresh токенов.
 
     Аргументы:
@@ -76,7 +76,7 @@ async def login(payload: UserLogin, db: Session = Depends(get_db)) -> dict[str, 
     response_model=ApiResponse[TokenResponse],
     summary="Обновление access_token с использованием refresh_token",
 )
-async def refresh_tokens(payload: RefreshTokenRequest, db: Session = Depends(get_db)) -> dict[str, str | TokenResponse]:
+def refresh_tokens(payload: RefreshTokenRequest, db: Session = Depends(get_db)) -> dict[str, str | TokenResponse]:
     """Обновить access_token и получить новую пару токенов по действующему refresh_token.
 
     Используется клиентом (фронтендом) при получении 401 HTTP-статуса для бесшовного обновления сессии.
@@ -98,7 +98,7 @@ async def refresh_tokens(payload: RefreshTokenRequest, db: Session = Depends(get
     response_model=BaseResponse,
     summary="Выход из системы и деактивация токена",
 )
-async def logout(
+def logout(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     credentials: HTTPBearer = Depends(AuthService.bearer_scheme),
@@ -120,7 +120,7 @@ async def logout(
     response_model=ApiResponse[UserResponse],
     summary="Получение информации о текущем пользователе",
 )
-async def auth_me(
+def auth_me(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, str | User]:
     """Получить информацию о текущем пользователе."""

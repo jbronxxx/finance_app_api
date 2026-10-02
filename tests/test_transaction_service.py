@@ -1,0 +1,197 @@
+"""Юнит и интеграционные тесты для TransactionService и эндпоинтов транзакций."""
+
+import uuid
+from datetime import datetime, timedelta, timezone
+
+import pytest
+from sqlalchemy.orm import Session
+
+from app.exceptions import NotFoundException
+from app.models.models import Category, Transaction, TransactionType, User
+from app.schemas.schemas import TransactionCreate
+from app.services.transaction_service import TransactionService
+
+
+class TestTransactionServiceUnit:
+    """Юнит-тесты бизнес-логики TransactionService."""
+
+    def test_create_transaction_default_date(self, db_session: Session, test_user: User):
+        """Создание транзакции без указания даты устанавливает текущее UTC время."""
+        service = TransactionService(db_session)
+        payload = TransactionCreate(
+            amount=350.0,
+            description="Кофе и круассан",
+            category=Category.food,
+            type=TransactionType.expense,
+        )
+        tx = service.create(test_user.id, payload)
+
+        assert tx.id is not None
+        assert tx.user_id == test_user.id
+        assert tx.amount == 350.0
+        assert tx.description == "Кофе и круассан"
+        assert tx.category == Category.food
+        assert tx.type == TransactionType.expense
+        assert tx.date is not None
+        # Проверяем, что дата создана в районе текущего времени
+        now = datetime.now(timezone.utc)
+        tx_date = tx.date if tx.date.tzinfo else tx.date.replace(tzinfo=timezone.utc)
+        assert abs((now - tx_date).total_seconds()) < 60
+
+    def test_create_transaction_custom_date(self, db_session: Session, test_user: User):
+        """Создание транзакции с указанием конкретной даты."""
+        service = TransactionService(db_session)
+        custom_date = datetime(2026, 5, 15, 12, 0, 0, tzinfo=timezone.utc)
+        payload = TransactionCreate(
+            amount=50000.0,
+            description="Зарплата",
+            category=Category.salary,
+            type=TransactionType.income,
+            date=custom_date,
+        )
+        tx = service.create(test_user.id, payload)
+
+        assert tx.amount == 50000.0
+        assert tx.type == TransactionType.income
+        assert tx.date is not None
+
+    def test_get_all_user_isolation(self, db_session: Session, test_user: User):
+        """Пользователь видит только свои транзакции."""
+        service = TransactionService(db_session)
+        other_user = User(
+            id=uuid.uuid4(),
+            email=f"other_{uuid.uuid4().hex[:6]}@example.com",
+            name="Other User",
+            hashed_password="pwd",
+        )
+        db_session.add(other_user)
+        db_session.commit()
+
+        # Создаем транзакцию для test_user
+        service.create(
+            test_user.id,
+            TransactionCreate(amount=100.0, description="My tx", category=Category.food, type=TransactionType.expense),
+        )
+        # Создаем транзакцию для other_user
+        service.create(
+            other_user.id,
+            TransactionCreate(amount=200.0, description="Other tx", category=Category.food, type=TransactionType.expense),
+        )
+
+        user_txs = service.get_all(test_user.id)
+        assert len(user_txs) == 1
+        assert user_txs[0].description == "My tx"
+
+    def test_get_all_filter_since(self, db_session: Session, test_user: User):
+        """Фильтрация транзакций по параметру since (created_at)."""
+        service = TransactionService(db_session)
+        tx = service.create(
+            test_user.id,
+            TransactionCreate(amount=150.0, description="Recent tx", category=Category.food, type=TransactionType.expense),
+        )
+
+        # Запрос с since в будущем не вернет ничего
+        future_time = datetime.now(timezone.utc) + timedelta(hours=1)
+        res_empty = service.get_all(test_user.id, since=future_time)
+        assert len(res_empty) == 0
+
+        # Запрос с since в прошлом вернет созданную транзакцию
+        past_time = datetime.now(timezone.utc) - timedelta(hours=1)
+        res_found = service.get_all(test_user.id, since=past_time)
+        assert len(res_found) == 1
+        assert res_found[0].id == tx.id
+
+    def test_delete_transaction_success(self, db_session: Session, test_user: User):
+        """Успешное удаление транзакции."""
+        service = TransactionService(db_session)
+        tx = service.create(
+            test_user.id,
+            TransactionCreate(amount=150.0, description="To delete", category=Category.food, type=TransactionType.expense),
+        )
+
+        service.delete(test_user.id, tx.id)
+        assert db_session.query(Transaction).filter(Transaction.id == tx.id).first() is None
+
+    def test_delete_transaction_not_found(self, db_session: Session, test_user: User):
+        """Попытка удаления несуществующей транзакции вызывает NotFoundException (404)."""
+        service = TransactionService(db_session)
+        random_id = uuid.uuid4()
+        with pytest.raises(NotFoundException) as exc_info:
+            service.delete(test_user.id, random_id)
+        assert exc_info.value.code == "TRANSACTION_NOT_FOUND"
+
+    def test_delete_transaction_other_user(self, db_session: Session, test_user: User):
+        """Попытка удалить чужую транзакцию вызывает NotFoundException."""
+        service = TransactionService(db_session)
+        other_user = User(
+            id=uuid.uuid4(),
+            email=f"other_{uuid.uuid4().hex[:6]}@example.com",
+            name="Other User",
+            hashed_password="pwd",
+        )
+        db_session.add(other_user)
+        db_session.commit()
+
+        tx = service.create(
+            other_user.id,
+            TransactionCreate(amount=150.0, description="Other tx", category=Category.food, type=TransactionType.expense),
+        )
+
+        with pytest.raises(NotFoundException) as exc_info:
+            service.delete(test_user.id, tx.id)
+        assert exc_info.value.code == "TRANSACTION_NOT_FOUND"
+
+    def test_get_etag(self, db_session: Session, test_user: User):
+        """Расчет ETag изменяется при добавлении транзакций."""
+        service = TransactionService(db_session)
+        etag1 = service.get_etag(test_user.id)
+
+        service.create(
+            test_user.id,
+            TransactionCreate(amount=100.0, description="Tx 1", category=Category.food, type=TransactionType.expense),
+        )
+        etag2 = service.get_etag(test_user.id)
+        assert etag1 != etag2
+
+
+class TestTransactionEndpointsIntegration:
+    """Интеграционные тесты для эндпоинтов /api/v1/transactions/."""
+
+    def test_create_and_list_transactions(self, client, auth_headers: dict[str, str]):
+        """Создание транзакции и получение списка через REST API."""
+        payload = {
+            "amount": 1200.50,
+            "description": "Покупка продуктов",
+            "category": "food",
+            "type": "expense",
+        }
+        # Create
+        create_res = client.post("/api/v1/transactions/", json=payload, headers=auth_headers)
+        assert create_res.status_code == 201
+        created_data = create_res.json()["data"]
+        tx_id = created_data["id"]
+        assert created_data["amount"] == 1200.50
+        assert created_data["category"] == "food"
+
+        # List
+        list_res = client.get("/api/v1/transactions/", headers=auth_headers)
+        assert list_res.status_code == 200
+        tx_list = list_res.json()["data"]
+        assert len(tx_list) == 1
+        assert tx_list[0]["id"] == tx_id
+        assert "ETag" in list_res.headers
+
+        # ETag caching (304 Not Modified)
+        etag = list_res.headers["ETag"]
+        cached_res = client.get("/api/v1/transactions/", headers={**auth_headers, "If-None-Match": etag})
+        assert cached_res.status_code == 304
+
+        # Delete
+        del_res = client.delete(f"/api/v1/transactions/{tx_id}", headers=auth_headers)
+        assert del_res.status_code == 200
+        assert del_res.json()["status"] == "success"
+
+        # Check list is now empty
+        empty_res = client.get("/api/v1/transactions/", headers=auth_headers)
+        assert empty_res.status_code == 200
+        assert len(empty_res.json()["data"]) == 0

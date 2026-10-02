@@ -2,7 +2,7 @@
 
 import enum
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import DateTime
 from sqlalchemy import Enum as SAEnum
@@ -54,7 +54,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Связи с другими сущностями
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -80,8 +80,8 @@ class Token(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     token: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="active")  # Статус токена (active, revoked, expired)
 
     # Связь с пользователем
@@ -113,8 +113,8 @@ class Transaction(Base):
     description: Mapped[str] = mapped_column(String(255), nullable=False)
     category: Mapped[Category] = mapped_column(SAEnum(Category), nullable=False)
     type: Mapped[TransactionType] = mapped_column(SAEnum(TransactionType), nullable=False)
-    date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    date: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Связь с пользователем
     user: Mapped["User"] = relationship(back_populates="transactions")
@@ -144,7 +144,7 @@ class Budget(Base):
     limit_amount: Mapped[float] = mapped_column(Float, nullable=False)
     month: Mapped[int] = mapped_column(nullable=False)
     year: Mapped[int] = mapped_column(nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Связь с пользователем
     user: Mapped["User"] = relationship(back_populates="budgets")

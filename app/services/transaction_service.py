@@ -2,7 +2,7 @@
 
 import hashlib
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -42,7 +42,7 @@ class TransactionService:
             description=payload.description,
             category=payload.category,
             type=payload.type,
-            date=payload.date or datetime.utcnow(),
+            date=payload.date or datetime.now(timezone.utc),
         )
         self.db.add(tx)
         self.db.commit()

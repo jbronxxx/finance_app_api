@@ -45,7 +45,7 @@ class TransactionService:
             date=payload.date or datetime.now(timezone.utc),
         )
         self.db.add(tx)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(tx)
         logger.info(f"Создана новая транзакция: {tx}")
         return tx
@@ -101,7 +101,7 @@ class TransactionService:
                 details={"transaction_id": str(transaction_id)},
             )
         self.db.delete(tx)
-        self.db.commit()
+        self.db.flush()
         logger.info(f"Транзакция удалена: {tx.id}")
 
     def get_etag(

@@ -4,6 +4,7 @@
 жизненным циклом сервиса (lifespan).
 """
 
+import asyncio
 import uuid
 from contextlib import asynccontextmanager
 
@@ -21,6 +22,7 @@ from app.exceptions import AppException, ErrorCode
 from app.limiter import limiter
 from app.routers import auth, budgets, insights, sync, transactions
 from app.schemas.schemas import ErrorResponse
+from app.tasks.token_cleanup import periodic_token_cleanup
 from config_reader.config_reader import config, validate_security_config
 from logger.logger import get_logger, reset_request_id, set_request_id
 
@@ -43,14 +45,21 @@ STATUS_CODE_TO_ERROR_CODE = {
 async def lifespan(app_instance: FastAPI):
     """Управление жизненным циклом приложения FastAPI.
 
-    Выполняет инициализацию ресурсов при старте сервера и освобождение ресурсов при его завершении.
+    Выполняет инициализацию ресурсов при старте сервера, запуск регламентных фоновых задач
+    и освобождение ресурсов при его завершении.
 
     Аргументы:
         app_instance (FastAPI): Экземпляр веб-приложения FastAPI.
     """
     validate_security_config(config)
     logger.info("Starting Finance App API")
+    cleanup_task = asyncio.create_task(periodic_token_cleanup())
     yield
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
     logger.info("Stopping Finance App API")
 
 

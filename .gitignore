@@ -16,6 +16,8 @@ PROJECT_SKILLS.md
 .skills.md
 TASKS.md
 PROJECT_TASKS.md
+.agents/
+.agent/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -1,7 +1,49 @@
 """Модуль настройки и инициализации логирования."""
 
+import contextvars
 import logging
 import sys
+
+# Контекстная переменная для хранения сквозного ID запроса (Correlation ID / Request ID)
+request_id_ctx_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
+
+
+class RequestIdFilter(logging.Filter):
+    """Фильтр логирования, обогащающий каждую запись текущим ID запроса."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = request_id_ctx_var.get()
+        return True
+
+
+def get_request_id() -> str:
+    """Получить текущий ID запроса из контекста.
+
+    Возвращает:
+        str: Значение X-Request-ID из контекста или '-' если вне контекста запроса.
+    """
+    return request_id_ctx_var.get()
+
+
+def set_request_id(req_id: str) -> contextvars.Token:
+    """Установить ID запроса в текущий контекст.
+
+    Аргументы:
+        req_id (str): Идентификатор запроса (Correlation ID / X-Request-ID).
+
+    Возвращает:
+        contextvars.Token: Токен для последующего сброса контекста.
+    """
+    return request_id_ctx_var.set(req_id)
+
+
+def reset_request_id(token: contextvars.Token) -> None:
+    """Сбросить ID запроса в контексте по сохраненному токену.
+
+    Аргументы:
+        token (contextvars.Token): Токен контекста, возвращенный set_request_id.
+    """
+    request_id_ctx_var.reset(token)
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -23,9 +65,10 @@ def get_logger(name: str) -> logging.Logger:
 
     handler = logging.StreamHandler(sys.stdout)
     handler.setLevel(logging.DEBUG)
+    handler.addFilter(RequestIdFilter())
 
     formatter = logging.Formatter(
-        fmt="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        fmt="%(asctime)s | %(levelname)-8s | [%(request_id)s] | %(name)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     handler.setFormatter(formatter)

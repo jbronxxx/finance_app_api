@@ -11,6 +11,9 @@ secrets/
 
 # Architecture & sensitive documentation
 ARCHITECTURE.md
+SKILLS.md
+PROJECT_SKILLS.md
+.skills.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -9,15 +9,19 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException
 
 from app.database import get_db
 from app.exceptions import AppException, ErrorCode
+from app.limiter import limiter
 from app.routers import auth, budgets, insights, sync, transactions
 from app.schemas.schemas import ErrorResponse
+from config_reader.config_reader import config, validate_security_config
 from logger.logger import get_logger, reset_request_id, set_request_id
 
 logger = get_logger(__name__)
@@ -29,6 +33,7 @@ STATUS_CODE_TO_ERROR_CODE = {
     404: ErrorCode.NOT_FOUND,
     405: ErrorCode.METHOD_NOT_ALLOWED,
     422: ErrorCode.VALIDATION_ERROR,
+    429: ErrorCode.RATE_LIMIT_EXCEEDED,
     500: ErrorCode.INTERNAL_SERVER_ERROR,
     503: ErrorCode.SERVICE_UNAVAILABLE,
 }
@@ -43,6 +48,7 @@ async def lifespan(app_instance: FastAPI):
     Аргументы:
         app_instance (FastAPI): Экземпляр веб-приложения FastAPI.
     """
+    validate_security_config(config)
     logger.info("Starting Finance App API")
     yield
     logger.info("Stopping Finance App API")
@@ -53,6 +59,17 @@ app = FastAPI(
     description="Персональный финансовый трекер с AI-инсайтами и аналитикой",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+app.state.limiter = limiter
+
+# Настройка CORS для кросс-доменных запросов веб-клиентов
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=config.cors_origins,
+    allow_credentials=config.cors_allow_credentials,
+    allow_methods=config.cors_allow_methods,
+    allow_headers=config.cors_allow_headers,
 )
 
 
@@ -129,6 +146,22 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    """Обработчик ошибок превышения лимита запросов (429 RateLimitExceeded)."""
+    error_response = ErrorResponse(
+        status="error",
+        code=ErrorCode.RATE_LIMIT_EXCEEDED,
+        message="Превышен лимит запросов. Пожалуйста, повторите попытку позже.",
+        details={"limit": str(exc.detail)},
+    )
+    return JSONResponse(
+        status_code=429,
+        content=error_response.model_dump(exclude_none=True),
+        headers={"Retry-After": str(getattr(exc, "retry_after", 60))},
+    )
+
+
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """Обработчик неожиданных серверных исключений (500)."""
@@ -145,6 +178,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 
 # Подключение маршрутизаторов модулей
+
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(transactions.router, prefix="/api/v1/transactions", tags=["transactions"])
 app.include_router(budgets.router, prefix="/api/v1/budgets", tags=["budgets"])

@@ -12,5 +12,14 @@ auth:
   access_token_expire_minutes: 60  # 1 hour
   refresh_token_expire_days: 7     # 7 days
 
+cors:
+  allow_origins:
+    - "*"
+  allow_credentials: true
+  allow_methods:
+    - "*"
+  allow_headers:
+    - "*"
+
 ai:
   model: "claude-haiku-4-5"

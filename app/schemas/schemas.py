@@ -31,19 +31,19 @@ class ApiResponse(BaseModel, Generic[T]):
 
 
 class PaginatedResponse(BaseModel, Generic[T]):
-    """Универсальная обертка для пагинированных списков элементов.
+    """Универсальная обертка для пагинированных списков элементов (keyset/cursor pagination).
 
     Атрибуты:
         items: Список элементов текущей страницы.
-        total: Общее количество записей в базе данных.
+        has_more: Флаг наличия следующих страниц.
+        next_cursor: Курсор для получения следующей страницы.
         limit: Количество записей на странице.
-        offset: Смещение выборки.
     """
 
     items: List[T] = Field(..., description="Список элементов текущей страницы")
-    total: int = Field(..., description="Общее количество записей")
+    has_more: bool = Field(..., description="Есть ли еще записи для загрузки")
+    next_cursor: Optional[str] = Field(default=None, description="Курсор для получения следующей страницы")
     limit: int = Field(..., description="Лимит записей на странице")
-    offset: int = Field(..., description="Смещение относительно начала списка")
 
 
 class ErrorResponse(BaseModel):

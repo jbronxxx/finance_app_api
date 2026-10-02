@@ -64,7 +64,7 @@ def create_transaction(
 )
 def list_transactions(
     limit: int = Query(50, ge=1, le=100, description="Количество транзакций на странице (макс. 100)"),
-    offset: int = Query(0, ge=0, description="Смещение относительно начала списка"),
+    cursor: str | None = Query(None, description="Курсор для получения следующей страницы"),
     since: datetime | None = None,
     if_none_match: str | None = Header(None, alias="If-None-Match"),
     response: Response = None,
@@ -74,12 +74,12 @@ def list_transactions(
     """Получить пагинированный список транзакций пользователя с поддержкой ETag-кэширования."""
     service = TransactionService(db)
 
-    current_etag = service.get_etag(current_user.id, since=since, limit=limit, offset=offset)
+    current_etag = service.get_etag(current_user.id, since=since, limit=limit, cursor=cursor)
 
     if if_none_match and if_none_match.strip('"') == current_etag:
         return Response(status_code=status.HTTP_304_NOT_MODIFIED)
 
-    items, total = service.get_all(current_user.id, since=since, limit=limit, offset=offset)
+    items, has_more, next_cursor = service.get_all(current_user.id, since=since, limit=limit, cursor=cursor)
     if response:
         response.headers["ETag"] = f'"{current_etag}"'
 
@@ -87,9 +87,9 @@ def list_transactions(
         "status": "success",
         "data": {
             "items": items,
-            "total": total,
+            "has_more": has_more,
+            "next_cursor": next_cursor,
             "limit": limit,
-            "offset": offset,
         },
     }
 

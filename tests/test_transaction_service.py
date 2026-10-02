@@ -79,8 +79,8 @@ class TestTransactionServiceUnit:
             TransactionCreate(amount=200.0, description="Other tx", category=Category.food, type=TransactionType.expense),
         )
 
-        user_txs, total = service.get_all(test_user.id)
-        assert total == 1
+        user_txs, has_more, next_cursor = service.get_all(test_user.id)
+        assert has_more is False
         assert len(user_txs) == 1
         assert user_txs[0].description == "My tx"
 
@@ -94,14 +94,14 @@ class TestTransactionServiceUnit:
 
         # Запрос с since в будущем не вернет ничего
         future_time = datetime.now(timezone.utc) + timedelta(hours=1)
-        res_empty, total_empty = service.get_all(test_user.id, since=future_time)
-        assert total_empty == 0
+        res_empty, has_more_empty, next_cursor_empty = service.get_all(test_user.id, since=future_time)
+        assert has_more_empty is False
         assert len(res_empty) == 0
 
         # Запрос с since в прошлом вернет созданную транзакцию
         past_time = datetime.now(timezone.utc) - timedelta(hours=1)
-        res_found, total_found = service.get_all(test_user.id, since=past_time)
-        assert total_found == 1
+        res_found, has_more_found, next_cursor_found = service.get_all(test_user.id, since=past_time)
+        assert has_more_found is False
         assert len(res_found) == 1
         assert res_found[0].id == tx.id
 
@@ -119,18 +119,19 @@ class TestTransactionServiceUnit:
                 ),
             )
 
-        page1, total1 = service.get_all(test_user.id, limit=5, offset=0)
-        assert total1 == 15
+        page1, has_more1, next_cursor1 = service.get_all(test_user.id, limit=5)
+        assert has_more1 is True
         assert len(page1) == 5
+        assert next_cursor1 is not None
 
-        page2, total2 = service.get_all(test_user.id, limit=5, offset=5)
-        assert total2 == 15
+        page2, has_more2, next_cursor2 = service.get_all(test_user.id, limit=5, cursor=next_cursor1)
+        assert has_more2 is True
         assert len(page2) == 5
         assert {tx.id for tx in page1}.isdisjoint({tx.id for tx in page2})
 
-        page_tail, total_tail = service.get_all(test_user.id, limit=5, offset=12)
-        assert total_tail == 15
-        assert len(page_tail) == 3
+        page3, has_more3, next_cursor3 = service.get_all(test_user.id, limit=5, cursor=next_cursor2)
+        assert has_more3 is False
+        assert len(page3) == 5
 
     def test_delete_transaction_success(self, db_session: Session, test_user: User):
         """Успешное удаление транзакции."""
@@ -208,9 +209,9 @@ class TestTransactionEndpointsIntegration:
         list_res = client.get("/api/v1/transactions/", headers=auth_headers)
         assert list_res.status_code == 200
         page_data = list_res.json()["data"]
-        assert page_data["total"] == 1
+        assert page_data["has_more"] is False
         assert page_data["limit"] == 50
-        assert page_data["offset"] == 0
+        assert "next_cursor" in page_data
         tx_list = page_data["items"]
         assert len(tx_list) == 1
         assert tx_list[0]["id"] == tx_id
@@ -229,7 +230,7 @@ class TestTransactionEndpointsIntegration:
         # Check list is now empty
         empty_res = client.get("/api/v1/transactions/", headers=auth_headers)
         assert empty_res.status_code == 200
-        assert empty_res.json()["data"]["total"] == 0
+        assert empty_res.json()["data"]["has_more"] is False
         assert len(empty_res.json()["data"]["items"]) == 0
 
     def test_pagination_params_and_validation(self, client, auth_headers: dict[str, str]):
@@ -247,21 +248,23 @@ class TestTransactionEndpointsIntegration:
                 headers=auth_headers,
             )
 
-        # limit = 2, offset = 1
-        res = client.get("/api/v1/transactions/?limit=2&offset=1", headers=auth_headers)
-        assert res.status_code == 200
-        data = res.json()["data"]
-        assert data["total"] == 5
-        assert data["limit"] == 2
-        assert data["offset"] == 1
-        assert len(data["items"]) == 2
+        # Получаем первую страницу
+        res1 = client.get("/api/v1/transactions/?limit=2", headers=auth_headers)
+        assert res1.status_code == 200
+        data1 = res1.json()["data"]
+        assert data1["has_more"] is True
+        assert data1["limit"] == 2
+        assert len(data1["items"]) == 2
+        next_cursor = data1["next_cursor"]
+
+        # Запрашиваем следующую
+        res2 = client.get(f"/api/v1/transactions/?limit=2&cursor={next_cursor}", headers=auth_headers)
+        assert res2.status_code == 200
+        data2 = res2.json()["data"]
+        assert data2["limit"] == 2
+        assert len(data2["items"]) == 2
 
         # Валидация limit > 100
         res_invalid_limit = client.get("/api/v1/transactions/?limit=101", headers=auth_headers)
         assert res_invalid_limit.status_code == 422
         assert res_invalid_limit.json()["code"] == "VALIDATION_ERROR"
-
-        # Валидация offset < 0
-        res_invalid_offset = client.get("/api/v1/transactions/?offset=-1", headers=auth_headers)
-        assert res_invalid_offset.status_code == 422
-        assert res_invalid_offset.json()["code"] == "VALIDATION_ERROR"

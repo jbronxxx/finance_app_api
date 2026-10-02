@@ -30,6 +30,22 @@ class ApiResponse(BaseModel, Generic[T]):
     message: Optional[str] = Field(default=None, description="Опциональное сообщение о результате")
 
 
+class PaginatedResponse(BaseModel, Generic[T]):
+    """Универсальная обертка для пагинированных списков элементов.
+
+    Атрибуты:
+        items: Список элементов текущей страницы.
+        total: Общее количество записей в базе данных.
+        limit: Количество записей на странице.
+        offset: Смещение выборки.
+    """
+
+    items: List[T] = Field(..., description="Список элементов текущей страницы")
+    total: int = Field(..., description="Общее количество записей")
+    limit: int = Field(..., description="Лимит записей на странице")
+    offset: int = Field(..., description="Смещение относительно начала списка")
+
+
 class ErrorResponse(BaseModel):
     """Обертка для ошибочных ответов.
 

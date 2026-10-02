@@ -79,7 +79,8 @@ class TestTransactionServiceUnit:
             TransactionCreate(amount=200.0, description="Other tx", category=Category.food, type=TransactionType.expense),
         )
 
-        user_txs = service.get_all(test_user.id)
+        user_txs, total = service.get_all(test_user.id)
+        assert total == 1
         assert len(user_txs) == 1
         assert user_txs[0].description == "My tx"
 
@@ -93,14 +94,43 @@ class TestTransactionServiceUnit:
 
         # Запрос с since в будущем не вернет ничего
         future_time = datetime.now(timezone.utc) + timedelta(hours=1)
-        res_empty = service.get_all(test_user.id, since=future_time)
+        res_empty, total_empty = service.get_all(test_user.id, since=future_time)
+        assert total_empty == 0
         assert len(res_empty) == 0
 
         # Запрос с since в прошлом вернет созданную транзакцию
         past_time = datetime.now(timezone.utc) - timedelta(hours=1)
-        res_found = service.get_all(test_user.id, since=past_time)
+        res_found, total_found = service.get_all(test_user.id, since=past_time)
+        assert total_found == 1
         assert len(res_found) == 1
         assert res_found[0].id == tx.id
+
+    def test_get_all_pagination_limit_and_offset(self, db_session: Session, test_user: User):
+        """Пагинация limit и offset возвращает правильные срезы и общее количество."""
+        service = TransactionService(db_session)
+        for i in range(15):
+            service.create(
+                test_user.id,
+                TransactionCreate(
+                    amount=10.0 + i,
+                    description=f"Tx #{i}",
+                    category=Category.food,
+                    type=TransactionType.expense,
+                ),
+            )
+
+        page1, total1 = service.get_all(test_user.id, limit=5, offset=0)
+        assert total1 == 15
+        assert len(page1) == 5
+
+        page2, total2 = service.get_all(test_user.id, limit=5, offset=5)
+        assert total2 == 15
+        assert len(page2) == 5
+        assert {tx.id for tx in page1}.isdisjoint({tx.id for tx in page2})
+
+        page_tail, total_tail = service.get_all(test_user.id, limit=5, offset=12)
+        assert total_tail == 15
+        assert len(page_tail) == 3
 
     def test_delete_transaction_success(self, db_session: Session, test_user: User):
         """Успешное удаление транзакции."""
@@ -177,7 +207,11 @@ class TestTransactionEndpointsIntegration:
         # List
         list_res = client.get("/api/v1/transactions/", headers=auth_headers)
         assert list_res.status_code == 200
-        tx_list = list_res.json()["data"]
+        page_data = list_res.json()["data"]
+        assert page_data["total"] == 1
+        assert page_data["limit"] == 50
+        assert page_data["offset"] == 0
+        tx_list = page_data["items"]
         assert len(tx_list) == 1
         assert tx_list[0]["id"] == tx_id
         assert "ETag" in list_res.headers
@@ -195,4 +229,39 @@ class TestTransactionEndpointsIntegration:
         # Check list is now empty
         empty_res = client.get("/api/v1/transactions/", headers=auth_headers)
         assert empty_res.status_code == 200
-        assert len(empty_res.json()["data"]) == 0
+        assert empty_res.json()["data"]["total"] == 0
+        assert len(empty_res.json()["data"]["items"]) == 0
+
+    def test_pagination_params_and_validation(self, client, auth_headers: dict[str, str]):
+        """Проверка работы параметров пагинации limit, offset и валидации границ."""
+        # Создаем несколько транзакций
+        for i in range(5):
+            client.post(
+                "/api/v1/transactions/",
+                json={
+                    "amount": 100.0 + i,
+                    "description": f"Покупка {i}",
+                    "category": "food",
+                    "type": "expense",
+                },
+                headers=auth_headers,
+            )
+
+        # limit = 2, offset = 1
+        res = client.get("/api/v1/transactions/?limit=2&offset=1", headers=auth_headers)
+        assert res.status_code == 200
+        data = res.json()["data"]
+        assert data["total"] == 5
+        assert data["limit"] == 2
+        assert data["offset"] == 1
+        assert len(data["items"]) == 2
+
+        # Валидация limit > 100
+        res_invalid_limit = client.get("/api/v1/transactions/?limit=101", headers=auth_headers)
+        assert res_invalid_limit.status_code == 422
+        assert res_invalid_limit.json()["code"] == "VALIDATION_ERROR"
+
+        # Валидация offset < 0
+        res_invalid_offset = client.get("/api/v1/transactions/?offset=-1", headers=auth_headers)
+        assert res_invalid_offset.status_code == 422
+        assert res_invalid_offset.json()["code"] == "VALIDATION_ERROR"

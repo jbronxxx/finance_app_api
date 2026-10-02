@@ -52,21 +52,23 @@ def sync_data(
 
     try:
         # 1. Сохраняем или обновляем транзакции (Upsert)
+        incoming_tx_ids = [item.id for item in payload.transactions if item.id is not None]
+        existing_txs_map = {}
+        if incoming_tx_ids:
+            existing_txs = (
+                db.query(Transaction)
+                .filter(
+                    Transaction.user_id == current_user.id,
+                    Transaction.id.in_(incoming_tx_ids),
+                )
+                .all()
+            )
+            existing_txs_map = {t.id: t for t in existing_txs}
+
         for item in payload.transactions:
             logger.debug(f"Синхронизация транзакции: {item}")
-            db_transaction = None
-
-            if item.id:
-                db_transaction = (
-                    db.query(Transaction)
-                    .filter(
-                        Transaction.user_id == current_user.id,
-                        Transaction.id == item.id,
-                    )
-                    .first()
-                )
-
-            if db_transaction:
+            if item.id and item.id in existing_txs_map:
+                db_transaction = existing_txs_map[item.id]
                 db_transaction.amount = item.amount
                 db_transaction.description = item.description
                 db_transaction.category = item.category
@@ -83,70 +85,52 @@ def sync_data(
                     date=item.date or datetime.now(timezone.utc),
                 )
                 db.add(db_transaction)
+                if item.id:
+                    existing_txs_map[item.id] = db_transaction
 
             synced_transactions.append(db_transaction)
 
         # 2. Удаляем бюджеты по ID из payload.deleted_budget_ids
-        for budget_id in payload.deleted_budget_ids:
-            logger.debug(f"Удаление бюджета по ID в процессе синхронизации: {budget_id}")
-            existing_budget = (
-                db.query(Budget)
-                .filter(
-                    Budget.user_id == current_user.id,
-                    Budget.id == budget_id,
-                )
-                .first()
-            )
-            if existing_budget:
-                db.delete(existing_budget)
+        if payload.deleted_budget_ids:
+            logger.debug(f"Удаление бюджетов по ID в процессе синхронизации: {payload.deleted_budget_ids}")
+            db.query(Budget).filter(
+                Budget.user_id == current_user.id,
+                Budget.id.in_(payload.deleted_budget_ids),
+            ).delete(synchronize_session=False)
 
         # 3. Удаляем бюджеты из payload.deleted_budgets
         for item in payload.deleted_budgets:
             logger.debug(
                 f"Удаление бюджета по категории/периоду из deleted_budgets: {item.category} ({item.month}/{item.year})"
             )
-            existing_budget = (
-                db.query(Budget)
-                .filter(
-                    Budget.user_id == current_user.id,
-                    Budget.category == item.category,
-                    Budget.month == item.month,
-                    Budget.year == item.year,
-                )
-                .first()
-            )
-            if existing_budget:
-                db.delete(existing_budget)
+            db.query(Budget).filter(
+                Budget.user_id == current_user.id,
+                Budget.category == item.category,
+                Budget.month == item.month,
+                Budget.year == item.year,
+            ).delete(synchronize_session=False)
 
         # 4. Сохраняем, обновляем или удаляем бюджеты из payload.budgets
-        for item in payload.budgets:
-            if item.check_deleted:
-                logger.debug(f"Удаление бюджета при синхронизации: {item.category} ({item.month}/{item.year})")
-                existing_budget = (
-                    db.query(Budget)
-                    .filter(
-                        Budget.user_id == current_user.id,
-                        Budget.category == item.category,
-                        Budget.month == item.month,
-                        Budget.year == item.year,
-                    )
-                    .first()
-                )
-                if existing_budget:
-                    db.delete(existing_budget)
-            else:
-                existing_budget = (
-                    db.query(Budget)
-                    .filter(
-                        Budget.user_id == current_user.id,
-                        Budget.category == item.category,
-                        Budget.month == item.month,
-                        Budget.year == item.year,
-                    )
-                    .first()
-                )
+        to_delete_budgets = [item for item in payload.budgets if item.check_deleted]
+        to_upsert_budgets = [item for item in payload.budgets if not item.check_deleted]
 
-                if existing_budget:
+        for item in to_delete_budgets:
+            logger.debug(f"Удаление бюджета при синхронизации: {item.category} ({item.month}/{item.year})")
+            db.query(Budget).filter(
+                Budget.user_id == current_user.id,
+                Budget.category == item.category,
+                Budget.month == item.month,
+                Budget.year == item.year,
+            ).delete(synchronize_session=False)
+
+        if to_upsert_budgets:
+            existing_user_budgets = db.query(Budget).filter(Budget.user_id == current_user.id).all()
+            existing_budget_map = {(b.category, b.month, b.year): b for b in existing_user_budgets}
+
+            for item in to_upsert_budgets:
+                key = (item.category, item.month, item.year)
+                if key in existing_budget_map:
+                    existing_budget = existing_budget_map[key]
                     logger.debug(f"Обновление лимита бюджета для {item.category} ({item.month}/{item.year})")
                     existing_budget.limit_amount = item.limit_amount
                     synced_budgets.append(existing_budget)
@@ -160,6 +144,7 @@ def sync_data(
                         year=item.year,
                     )
                     db.add(db_budget)
+                    existing_budget_map[key] = db_budget
                     synced_budgets.append(db_budget)
 
         db.commit()
@@ -169,7 +154,7 @@ def sync_data(
         for t in synced_transactions:
             db.refresh(t)
 
-        enriched_budgets = [budget_service._enrich(b, current_user.id) for b in synced_budgets]
+        enriched_budgets = budget_service.enrich_multiple(synced_budgets, current_user.id)
 
     except SQLAlchemyError as e:
         db.rollback()

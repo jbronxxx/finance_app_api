@@ -179,3 +179,58 @@ class TestSyncEndpointIntegration:
         db_session.expire_all()
         remaining_budgets = db_session.query(Budget).filter(Budget.user_id == test_user.id).all()
         assert len(remaining_budgets) == 0
+
+    def test_sync_batch_multiple_items_and_enrichment(
+        self, client, auth_headers: dict[str, str], db_session: Session, test_user: User
+    ):
+        """Пакетная синхронизация 10+ транзакций и нескольких бюджетов корректно рассчитывает агрегаты."""
+        tx_items = []
+        for i in range(10):
+            tx_items.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "amount": 100.0,
+                    "description": f"Exp {i}",
+                    "category": "food",
+                    "type": "expense",
+                    "date": "2026-10-02T10:00:00Z",
+                }
+            )
+
+        budget_items = [
+            {
+                "category": "food",
+                "limit_amount": 2000.0,
+                "month": 10,
+                "year": 2026,
+            },
+            {
+                "category": "transport",
+                "limit_amount": 1000.0,
+                "month": 10,
+                "year": 2026,
+            },
+        ]
+
+        payload = {
+            "transactions": tx_items,
+            "budgets": budget_items,
+            "deleted_budget_ids": [],
+            "deleted_budgets": [],
+        }
+
+        response = client.post("/api/v1/sync/", json=payload, headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()["data"]
+
+        assert len(data["synced_transactions"]) == 10
+        assert len(data["synced_budgets"]) == 2
+
+        food_budget = next(b for b in data["synced_budgets"] if b["category"] == "food")
+        transport_budget = next(b for b in data["synced_budgets"] if b["category"] == "transport")
+
+        # 10 транзакций по 100.0 = 1000.0 spent
+        assert Decimal(str(food_budget["spent"])) == Decimal("1000.0")
+        assert Decimal(str(food_budget["remaining"])) == Decimal("1000.0")
+        assert Decimal(str(transport_budget["spent"])) == Decimal("0.00")
+        assert Decimal(str(transport_budget["remaining"])) == Decimal("1000.0")

@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 import pytest
 from sqlalchemy.orm import Session
@@ -170,7 +171,7 @@ class TestTransactionEndpointsIntegration:
         assert create_res.status_code == 201
         created_data = create_res.json()["data"]
         tx_id = created_data["id"]
-        assert created_data["amount"] == 1200.50
+        assert Decimal(str(created_data["amount"])) == Decimal("1200.50")
         assert created_data["category"] == "food"
 
         # List

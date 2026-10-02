@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Generic, List, Optional, TypeVar
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -152,14 +153,14 @@ class TransactionCreate(BaseModel):
     """Схема запроса на создание транзакции (дохода или расхода).
 
     Атрибуты:
-        amount (float): Сумма операции (> 0).
+        amount (Decimal): Сумма операции (> 0).
         description (str): Описание операции.
         category (Category): Категория транзакции.
         type (TransactionType): Тип транзакции (income / expense).
         date (datetime | None): Дата и время операции.
     """
 
-    amount: float = Field(..., gt=0, description="Сумма операции (должна быть больше 0)")
+    amount: Decimal = Field(..., gt=Decimal("0"), description="Сумма операции (должна быть больше 0)")
     description: str = Field(..., min_length=1, max_length=255, description="Описание или назначение платежа")
     category: Category = Field(..., description="Категория операции")
     type: TransactionType = Field(..., description="Тип операции: income (доход) или expense (расход)")
@@ -171,7 +172,7 @@ class TransactionResponse(BaseModel):
 
     Атрибуты:
         id (uuid.UUID): Уникальный идентификатор транзакции.
-        amount (float): Сумма операции.
+        amount (Decimal): Сумма операции.
         description (str): Описание транзакции.
         category (Category): Категория.
         type (TransactionType): Тип (income / expense).
@@ -182,7 +183,7 @@ class TransactionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID = Field(..., description="ID транзакции")
-    amount: float = Field(..., description="Сумма транзакции")
+    amount: Decimal = Field(..., description="Сумма транзакции")
     description: str = Field(..., description="Описание транзакции")
     category: Category = Field(..., description="Категория транзакции")
     type: TransactionType = Field(..., description="Тип операции")
@@ -200,13 +201,13 @@ class BudgetCreate(BaseModel):
 
     Атрибуты:
         category (Category): Категория расходов.
-        limit_amount (float): Устанавливаемый лимит суммы.
+        limit_amount (Decimal): Устанавливаемый лимит суммы.
         month (int): Месяц (1-12).
         year (int): Год.
     """
 
     category: Category = Field(..., description="Категория расходов")
-    limit_amount: float = Field(..., gt=0, description="Лимит суммы на указанный месяц")
+    limit_amount: Decimal = Field(..., gt=Decimal("0"), description="Лимит суммы на указанный месяц")
     month: int = Field(..., ge=1, le=12, description="Номер месяца (от 1 до 12)")
     year: int = Field(..., ge=2000, le=2100, description="Год")
 
@@ -217,22 +218,22 @@ class BudgetResponse(BaseModel):
     Атрибуты:
         id (uuid.UUID): Идентификатор записи бюджета.
         category (Category): Категория расходов.
-        limit_amount (float): Установленный лимит суммы.
+        limit_amount (Decimal): Установленный лимит бюджета.
         month (int): Месяц действия.
         year (int): Год действия.
-        spent (float): Фактически потраченная сумма за указанный период.
-        remaining (float): Оставшаяся доступная сумма лимита.
+        spent (Decimal): Фактически потраченная сумма за указанный период.
+        remaining (Decimal): Оставшаяся доступная сумма лимита.
     """
 
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID = Field(..., description="ID бюджета")
     category: Category = Field(..., description="Категория расходов")
-    limit_amount: float = Field(..., description="Установленный лимит бюджета")
+    limit_amount: Decimal = Field(..., description="Установленный лимит бюджета")
     month: int = Field(..., description="Месяц")
     year: int = Field(..., description="Год")
-    spent: float = Field(default=0.0, description="Фактически израсходовано")
-    remaining: float = Field(default=0.0, description="Остаток лимита")
+    spent: Decimal = Field(default=Decimal("0.00"), description="Фактически израсходовано")
+    remaining: Decimal = Field(default=Decimal("0.00"), description="Остаток лимита")
 
 
 # ============================================================================
@@ -247,7 +248,7 @@ class TransactionSyncItem(BaseModel):
     local_id: Optional[int] = Field(default=None, description="Локальный ID на клиенте")
     type: TransactionType = Field(..., description="Тип операции")
     category: Category = Field(..., description="Категория")
-    amount: float = Field(..., gt=0, description="Сумма")
+    amount: Decimal = Field(..., gt=Decimal("0"), description="Сумма")
     date: datetime = Field(..., description="Дата и время")
     description: str = Field(..., description="Описание")
 
@@ -257,7 +258,7 @@ class BudgetSyncItem(BaseModel):
 
     id: Optional[uuid.UUID] = Field(default=None, description="ID бюджета (если уже создан на сервере)")
     category: Category = Field(..., description="Категория")
-    limit_amount: float = Field(default=0.0, ge=0, description="Лимит бюджета")
+    limit_amount: Decimal = Field(default=Decimal("0.00"), ge=Decimal("0"), description="Лимит бюджета")
     month: int = Field(..., ge=1, le=12, description="Месяц")
     year: int = Field(..., ge=2000, le=2100, description="Год")
     is_deleted: bool = Field(default=False, description="Флаг удаления бюджета на клиенте")

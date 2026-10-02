@@ -36,7 +36,7 @@ router = APIRouter(
     status_code=status.HTTP_201_CREATED,
     summary="Установить бюджет по категории",
 )
-async def create_budget(
+def create_budget(
     payload: BudgetCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -56,7 +56,7 @@ async def create_budget(
     response_model=ApiResponse[list[BudgetResponse]],
     summary="Получить список бюджетов",
 )
-async def list_budgets(
+def list_budgets(
     month: int | None = Query(default=None, ge=1, le=12, description="Фильтр по номеру месяца (1-12)"),
     year: int | None = Query(default=None, ge=2000, le=2100, description="Фильтр по году"),
     if_none_match: str | None = Header(None, alias="If-None-Match"),
@@ -84,7 +84,7 @@ async def list_budgets(
     response_model=ApiResponse[BudgetResponse],
     summary="Получить бюджет по ID",
 )
-async def get_budget(
+def get_budget(
     budget_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -100,7 +100,7 @@ async def get_budget(
     response_model=BaseResponse,
     summary="Удалить бюджет по ID",
 )
-async def delete_budget(
+def delete_budget(
     budget_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -116,7 +116,7 @@ async def delete_budget(
     response_model=BaseResponse,
     summary="Удалить бюджет по категории, месяцу и году",
 )
-async def delete_budget_by_category_period(
+def delete_budget_by_category_period(
     category: Category,
     month: int,
     year: int,

@@ -36,7 +36,7 @@ router = APIRouter(
     status_code=status.HTTP_201_CREATED,
     summary="Добавить новую транзакцию",
 )
-async def create_transaction(
+def create_transaction(
     payload: TransactionCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -61,7 +61,7 @@ async def create_transaction(
     response_model=ApiResponse[list[TransactionResponse]],
     summary="Получить список транзакций",
 )
-async def list_transactions(
+def list_transactions(
     since: datetime | None = None,
     if_none_match: str | None = Header(None, alias="If-None-Match"),
     response: Response = None,
@@ -87,7 +87,7 @@ async def list_transactions(
     response_model=BaseResponse,
     summary="Удалить транзакцию",
 )
-async def delete_transaction(
+def delete_transaction(
     transaction_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),

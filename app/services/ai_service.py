@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timezone
 
 import anthropic
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from app.models.models import Transaction
@@ -102,13 +103,16 @@ class AIService:
                 generated_at=datetime.now(timezone.utc),
             )
 
-        transactions = (
-            self.db.query(Transaction)
-            .filter(Transaction.user_id == user_id)
-            .order_by(Transaction.date.desc())
-            .limit(50)
-            .all()
-        )
+        def _get_txs():
+            return (
+                self.db.query(Transaction)
+                .filter(Transaction.user_id == user_id)
+                .order_by(Transaction.date.desc())
+                .limit(50)
+                .all()
+            )
+
+        transactions = await run_in_threadpool(_get_txs)
 
         if not transactions:
             return InsightResponse(

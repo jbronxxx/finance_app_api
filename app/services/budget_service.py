@@ -50,7 +50,7 @@ class BudgetService:
         if existing_budget:
             logger.info(f"Обновление существующего бюджета {existing_budget.id} для пользователя {user_id}")
             existing_budget.limit_amount = payload.limit_amount
-            self.db.commit()
+            self.db.flush()
             self.db.refresh(existing_budget)
             return self._enrich(existing_budget, user_id)
 
@@ -62,7 +62,7 @@ class BudgetService:
             year=payload.year,
         )
         self.db.add(budget)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(budget)
         logger.info(f"Создан новый бюджет: {budget}")
         return self._enrich(budget, user_id)
@@ -126,7 +126,7 @@ class BudgetService:
                 details={"budget_id": str(budget_id)},
             )
         self.db.delete(budget)
-        self.db.commit()
+        self.db.flush()
         logger.info(f"Бюджет удален: {budget_id}")
 
     def delete_by_category_period(self, user_id: uuid.UUID, category: Category, month: int, year: int) -> bool:
@@ -154,7 +154,7 @@ class BudgetService:
         if not budget:
             return False
         self.db.delete(budget)
-        self.db.commit()
+        self.db.flush()
         logger.info(f"Бюджет удален по категории и периоду: {category} ({month}/{year})")
         return True
 

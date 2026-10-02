@@ -50,6 +50,10 @@ def client(db_session: Session) -> TestClient:
     def _override_get_db():
         try:
             yield db_session
+            db_session.commit()
+        except Exception:
+            db_session.rollback()
+            raise
         finally:
             pass
 

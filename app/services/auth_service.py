@@ -5,14 +5,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Union
 
 import bcrypt
-from fastapi import Depends, status
+from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.exceptions import (
-    AppException,
     BadRequestException,
     ErrorCode,
     NotFoundException,
@@ -65,7 +64,7 @@ class AuthService:
         hashed = bcrypt.hashpw(payload.password.encode(), bcrypt.gensalt()).decode()
         user = User(email=payload.email, hashed_password=hashed, name=payload.name)
         self.db.add(user)
-        self.db.commit()
+        self.db.flush()
         self.db.refresh(user)
         logger.info(f"Зарегистрирован новый пользователь: {user.email} (ID: {user.id})")
         return user
@@ -129,26 +128,17 @@ class AuthService:
         logger.debug(f"Генерация access-токена для пользователя {user_id_str} (истекает: {expire})")
         token_str = jwt.encode(payload, config.secret_key, algorithm=config.algorithm)
 
-        try:
-            db_token = Token(
-                user_id=user_uuid,
-                token=token_str,
-                expires_at=expire,
-                status="active",
-            )
-            self.db.add(db_token)
-            self.db.commit()
-            self.db.refresh(db_token)
-            logger.debug(f"Access-токен успешно сохранен в БД для пользователя {user_id_str}")
-            return db_token.token
-        except Exception as e:
-            self.db.rollback()
-            logger.error(f"Ошибка сохранения access-токена в БД для пользователя {user_id_str}: {e}")
-            raise AppException(
-                code=ErrorCode.INTERNAL_SERVER_ERROR,
-                message="Ошибка при создании токена доступа",
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+        db_token = Token(
+            user_id=user_uuid,
+            token=token_str,
+            expires_at=expire,
+            status="active",
+        )
+        self.db.add(db_token)
+        self.db.flush()
+        self.db.refresh(db_token)
+        logger.debug(f"Access-токен успешно сохранен в БД для пользователя {user_id_str}")
+        return db_token.token
 
     def create_refresh_token(self, user_id: Union[str, uuid.UUID]) -> str:
         """Сгенерировать и сохранить в БД refresh_token для пользователя.
@@ -171,26 +161,17 @@ class AuthService:
         logger.debug(f"Генерация refresh-токена для пользователя {user_id_str} (истекает: {expire})")
         refresh_token_str = jwt.encode(payload, config.secret_key, algorithm=config.algorithm)
 
-        try:
-            db_token = Token(
-                user_id=user_uuid,
-                token=refresh_token_str,
-                expires_at=expire,
-                status="active",
-            )
-            self.db.add(db_token)
-            self.db.commit()
-            self.db.refresh(db_token)
-            logger.debug(f"Refresh-токен успешно сохранен в БД для пользователя {user_id_str}")
-            return db_token.token
-        except Exception as e:
-            self.db.rollback()
-            logger.error(f"Ошибка сохранения refresh-токена в БД для пользователя {user_id_str}: {e}")
-            raise AppException(
-                code=ErrorCode.INTERNAL_SERVER_ERROR,
-                message="Ошибка при создании refresh токена",
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+        db_token = Token(
+            user_id=user_uuid,
+            token=refresh_token_str,
+            expires_at=expire,
+            status="active",
+        )
+        self.db.add(db_token)
+        self.db.flush()
+        self.db.refresh(db_token)
+        logger.debug(f"Refresh-токен успешно сохранен в БД для пользователя {user_id_str}")
+        return db_token.token
 
     def refresh_tokens(self, refresh_token_string: str) -> TokenResponse:
         """Обновить access_token и получить новый refresh_token по существующему refresh_token.
@@ -244,7 +225,7 @@ class AuthService:
 
         if token_expires_at < datetime.now(timezone.utc):
             db_token.status = "expired"
-            self.db.commit()
+            self.db.flush()
             logger.warning(f"Истек срок действия refresh-токена в базе данных для пользователя {db_token.user_id}")
             raise UnauthorizedException(
                 code=ErrorCode.EXPIRED_TOKEN,
@@ -277,7 +258,7 @@ class AuthService:
 
         # Ротация refresh-токена: деактивируем старый refresh_token
         db_token.status = "revoked"
-        self.db.commit()
+        self.db.flush()
 
         # Генерируем новую пару токенов
         new_access_token = self.create_access_token(user.id)
@@ -306,7 +287,7 @@ class AuthService:
         if user_token:
             logger.debug(f"Деактивация токена для пользователя {user_id}")
             user_token.status = "revoked"
-            self.db.commit()
+            self.db.flush()
             logger.info(f"Токен успешно отзывен при выходе пользователя {user_id}")
         else:
             logger.warning(f"Попытка отзыва несуществующего токена для пользователя {user_id}")
@@ -314,6 +295,29 @@ class AuthService:
                 code=ErrorCode.TOKEN_NOT_FOUND,
                 message="Токен не найден для деактивации",
             )
+
+    def cleanup_expired_tokens(self, retention_days: int = 30) -> int:
+        """Удалить устаревшие токены, срок действия которых истек более retention_days назад,
+
+        или токены со статусом revoked/expired старше указанного порога.
+
+        Аргументы:
+            retention_days (int): Количество дней хранения истекших токенов (по умолчанию 30).
+
+        Возвращает:
+            int: Количество удаленных записей токенов.
+        """
+        threshold = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        deleted_count = (
+            self.db.query(Token)
+            .filter(
+                (Token.expires_at < threshold) | (Token.status.in_(["expired", "revoked"]) & (Token.created_at < threshold))
+            )
+            .delete(synchronize_session=False)
+        )
+        self.db.flush()
+        logger.info(f"Очистка токенов: удалено {deleted_count} устаревших токенов (порог: {threshold.isoformat()})")
+        return deleted_count
 
 
 def get_current_user(
@@ -385,7 +389,7 @@ def get_current_user(
 
     if token_expires_at < datetime.now(timezone.utc):
         db_token.status = "expired"
-        db.commit()
+        db.flush()
         logger.warning(f"Истек срок действия access-токена в базе данных для пользователя {db_token.user_id}")
         raise UnauthorizedException(
             code=ErrorCode.EXPIRED_TOKEN,

@@ -54,33 +54,60 @@ class TransactionService:
         self,
         user_id: uuid.UUID,
         since: datetime | None = None,
-        limit: int | None = None,
-        offset: int | None = None,
-    ) -> tuple[list[Transaction], int]:
-        """Получение транзакций с поддержкой пагинации и фильтрации по времени создания.
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> tuple[list[Transaction], bool, str | None]:
+        """Получение транзакций с поддержкой курсорной пагинации (keyset pagination) и фильтрации.
 
         Аргументы:
             user_id (uuid.UUID): Уникальный ID пользователя.
             since (datetime | None): Фильтр по минимальной дате создания (created_at).
-            limit (int | None): Максимальное количество возвращаемых записей.
-            offset (int | None): Смещение относительно начала выборки.
+            limit (int): Максимальное количество возвращаемых записей.
+            cursor (str | None): Курсор для получения следующей страницы.
 
         Возвращает:
-            tuple[list[Transaction], int]: Кортеж из списка транзакций текущей страницы и общего числа записей.
+            tuple[list[Transaction], bool, str | None]: Кортеж из списка транзакций, флага наличия след. страницы и курсора.
         """
+        import base64
+        import json
+
+        from sqlalchemy import and_, or_
+
         query = self.db.query(Transaction).filter(Transaction.user_id == user_id)
         if since:
             query = query.filter(Transaction.created_at >= since)
 
-        total = query.count()
-        query = query.order_by(Transaction.date.desc())
+        if cursor:
+            try:
+                cursor_data = json.loads(base64.b64decode(cursor).decode("utf-8"))
+                cursor_date = datetime.fromisoformat(cursor_data["d"])
+                if cursor_date.tzinfo is None:
+                    cursor_date = cursor_date.replace(tzinfo=timezone.utc)
+                cursor_id = uuid.UUID(cursor_data["i"])
 
-        if offset is not None:
-            query = query.offset(offset)
-        if limit is not None:
-            query = query.limit(limit)
+                query = query.filter(
+                    or_(Transaction.date < cursor_date, and_(Transaction.date == cursor_date, Transaction.id < cursor_id))
+                )
+            except Exception as e:
+                logger.warning(f"Некорректный курсор {cursor}: {e}")
 
-        return query.all(), total
+        query = query.order_by(Transaction.date.desc(), Transaction.id.desc())
+
+        # Запрашиваем на 1 больше, чтобы определить, есть ли следующая страница
+        query = query.limit(limit + 1)
+
+        items = query.all()
+        has_more = len(items) > limit
+        if has_more:
+            items = items[:limit]
+
+        next_cursor = None
+        if items:
+            last_item = items[-1]
+            cursor_data = {"d": last_item.date.isoformat(), "i": str(last_item.id)}
+            next_cursor = base64.b64encode(json.dumps(cursor_data).encode("utf-8")).decode("utf-8")
+
+        return items, has_more, next_cursor
 
     def delete(self, user_id: uuid.UUID, transaction_id: uuid.UUID) -> None:
         """Удалить транзакцию по ее идентификатору.
@@ -108,17 +135,15 @@ class TransactionService:
         self,
         user_id: uuid.UUID,
         since: datetime | None = None,
-        limit: int | None = None,
-        offset: int | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
     ) -> str:
-        """Быстрый расчет ETag без выгрузки всех объектов с учетом пагинации."""
-        query = self.db.query(func.count(Transaction.id), func.max(Transaction.created_at)).filter(
-            Transaction.user_id == user_id
-        )
+        """Быстрый расчет ETag без выгрузки всех объектов с учетом пагинации (без count)."""
+        query = self.db.query(func.max(Transaction.created_at)).filter(Transaction.user_id == user_id)
 
         if since:
             query = query.filter(Transaction.created_at >= since)
 
-        count, max_created = query.first()
-        raw_str = f"{user_id}:{count}:{max_created.isoformat() if max_created else ''}:{limit}:{offset}"
+        max_created = query.scalar()
+        raw_str = f"{user_id}:{max_created.isoformat() if max_created else ''}:{limit}:{cursor or ''}"
         return hashlib.md5(raw_str.encode()).hexdigest()

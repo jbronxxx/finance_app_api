@@ -1,5 +1,6 @@
-"""Эндпоинт пакетной синхронизации офлайн данных транзакций и бюджетов."""
+"""Эндпоинт пакетной синхронизации оффлайн данных транзакций и бюджетов."""
 
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, status
@@ -50,18 +51,39 @@ async def sync_data(
     budget_service = BudgetService(db)
 
     try:
-        # 1. Сохраняем транзакции
+        # 1. Сохраняем или обновляем транзакции (Upsert)
         for item in payload.transactions:
             logger.debug(f"Синхронизация транзакции: {item}")
-            db_transaction = Transaction(
-                user_id=current_user.id,
-                amount=item.amount,
-                description=item.description,
-                category=item.category,
-                type=item.type,
-                date=item.date or datetime.now(timezone.utc),
-            )
-            db.add(db_transaction)
+            db_transaction = None
+
+            if item.id:
+                db_transaction = (
+                    db.query(Transaction)
+                    .filter(
+                        Transaction.user_id == current_user.id,
+                        Transaction.id == item.id,
+                    )
+                    .first()
+                )
+
+            if db_transaction:
+                db_transaction.amount = item.amount
+                db_transaction.description = item.description
+                db_transaction.category = item.category
+                db_transaction.type = item.type
+                db_transaction.date = item.date or db_transaction.date
+            else:
+                db_transaction = Transaction(
+                    id=item.id or uuid.uuid4(),
+                    user_id=current_user.id,
+                    amount=item.amount,
+                    description=item.description,
+                    category=item.category,
+                    type=item.type,
+                    date=item.date or datetime.now(timezone.utc),
+                )
+                db.add(db_transaction)
+
             synced_transactions.append(db_transaction)
 
         # 2. Удаляем бюджеты по ID из payload.deleted_budget_ids

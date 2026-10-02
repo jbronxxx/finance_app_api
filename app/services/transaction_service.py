@@ -50,12 +50,37 @@ class TransactionService:
         logger.info(f"Создана новая транзакция: {tx}")
         return tx
 
-    def get_all(self, user_id: uuid.UUID, since: datetime | None = None) -> list[Transaction]:
-        """Получение транзакций с поддержкой фильтрации по времени создания."""
+    def get_all(
+        self,
+        user_id: uuid.UUID,
+        since: datetime | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> tuple[list[Transaction], int]:
+        """Получение транзакций с поддержкой пагинации и фильтрации по времени создания.
+
+        Аргументы:
+            user_id (uuid.UUID): Уникальный ID пользователя.
+            since (datetime | None): Фильтр по минимальной дате создания (created_at).
+            limit (int | None): Максимальное количество возвращаемых записей.
+            offset (int | None): Смещение относительно начала выборки.
+
+        Возвращает:
+            tuple[list[Transaction], int]: Кортеж из списка транзакций текущей страницы и общего числа записей.
+        """
         query = self.db.query(Transaction).filter(Transaction.user_id == user_id)
         if since:
             query = query.filter(Transaction.created_at >= since)
-        return query.order_by(Transaction.date.desc()).all()
+
+        total = query.count()
+        query = query.order_by(Transaction.date.desc())
+
+        if offset is not None:
+            query = query.offset(offset)
+        if limit is not None:
+            query = query.limit(limit)
+
+        return query.all(), total
 
     def delete(self, user_id: uuid.UUID, transaction_id: uuid.UUID) -> None:
         """Удалить транзакцию по ее идентификатору.
@@ -79,8 +104,14 @@ class TransactionService:
         self.db.commit()
         logger.info(f"Транзакция удалена: {tx.id}")
 
-    def get_etag(self, user_id: uuid.UUID, since: datetime | None = None) -> str:
-        """Быстрый расчет ETag без выгрузки всех объектов."""
+    def get_etag(
+        self,
+        user_id: uuid.UUID,
+        since: datetime | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> str:
+        """Быстрый расчет ETag без выгрузки всех объектов с учетом пагинации."""
         query = self.db.query(func.count(Transaction.id), func.max(Transaction.created_at)).filter(
             Transaction.user_id == user_id
         )
@@ -89,5 +120,5 @@ class TransactionService:
             query = query.filter(Transaction.created_at >= since)
 
         count, max_created = query.first()
-        raw_str = f"{user_id}:{count}:{max_created.isoformat() if max_created else ''}"
+        raw_str = f"{user_id}:{count}:{max_created.isoformat() if max_created else ''}:{limit}:{offset}"
         return hashlib.md5(raw_str.encode()).hexdigest()

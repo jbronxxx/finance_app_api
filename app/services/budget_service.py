@@ -105,7 +105,7 @@ class BudgetService:
             query = query.filter(Budget.year == year)
         budgets = query.all()
         logger.info(f"Получено {len(budgets)} бюджетов для пользователя {user_id} с фильтром месяц={month}, год={year}")
-        return [self._enrich(b, user_id) for b in budgets]
+        return self.enrich_multiple(budgets, user_id)
 
     def delete(self, user_id: uuid.UUID, budget_id: uuid.UUID) -> None:
         """Удалить бюджет по его идентификатору.
@@ -171,11 +171,61 @@ class BudgetService:
         raw_str = f"{user_id}:{count}:{max_created.isoformat() if max_created else ''}"
         return hashlib.md5(raw_str.encode()).hexdigest()
 
+    def enrich_multiple(self, budgets: list[Budget], user_id: uuid.UUID) -> list[BudgetResponse]:
+        """Обогатить список бюджетов агрегированными данными о фактических расходах за один SQL-запрос.
+
+        Аргументы:
+            budgets (list[Budget]): Список сущностей бюджетов.
+            user_id (uuid.UUID): Уникальный ID пользователя.
+
+        Возвращает:
+            list[BudgetResponse]: Список обогащенных ответов со spent и remaining.
+        """
+        if not budgets:
+            return []
+
+        # Агрегируем расходы одним SQL-запросом с группировкой по категории, месяцу и году
+        expenses_records = (
+            self.db.query(
+                Transaction.category,
+                func.extract("month", Transaction.date).label("month"),
+                func.extract("year", Transaction.date).label("year"),
+                func.sum(Transaction.amount).label("spent"),
+            )
+            .filter(
+                Transaction.user_id == user_id,
+                Transaction.type == TransactionType.expense,
+            )
+            .group_by(
+                Transaction.category,
+                func.extract("month", Transaction.date),
+                func.extract("year", Transaction.date),
+            )
+            .all()
+        )
+
+        spent_map = {(rec.category, int(rec.month), int(rec.year)): Decimal(str(rec.spent)) for rec in expenses_records}
+
+        enriched = []
+        for b in budgets:
+            spent = spent_map.get((b.category, b.month, b.year), Decimal("0.00"))
+            limit_amount = Decimal(str(b.limit_amount)) if b.limit_amount is not None else Decimal("0.00")
+            remaining = max(Decimal("0.00"), limit_amount - spent)
+            enriched.append(
+                BudgetResponse(
+                    id=b.id,
+                    category=b.category,
+                    limit_amount=limit_amount,
+                    month=b.month,
+                    year=b.year,
+                    spent=spent,
+                    remaining=remaining,
+                )
+            )
+        return enriched
+
     def _enrich(self, budget: Budget, user_id: uuid.UUID) -> BudgetResponse:
         """Обогатить объект бюджета агрегированными данными о фактических расходах.
-
-        Вычислить сумму всех расходных транзакций пользователя по данной категории
-        за указанный месяц и год, а также остаток от лимита.
 
         Аргументы:
             budget (Budget): Сущность бюджета из БД.
@@ -184,28 +234,4 @@ class BudgetService:
         Возвращает:
             BudgetResponse: Ответ со значениями spent (потрачено) и remaining (остаток).
         """
-        raw_spent = (
-            self.db.query(func.sum(Transaction.amount))
-            .filter(
-                Transaction.user_id == user_id,
-                Transaction.category == budget.category,
-                Transaction.type == TransactionType.expense,
-                func.extract("month", Transaction.date) == budget.month,
-                func.extract("year", Transaction.date) == budget.year,
-            )
-            .scalar()
-        )
-        spent = Decimal(str(raw_spent)) if raw_spent is not None else Decimal("0.00")
-        limit_amount = Decimal(str(budget.limit_amount)) if budget.limit_amount is not None else Decimal("0.00")
-        remaining = max(Decimal("0.00"), limit_amount - spent)
-
-        logger.info(f"Расчет расходов для бюджета {budget.id}: потрачено={spent}, лимит={limit_amount}")
-        return BudgetResponse(
-            id=budget.id,
-            category=budget.category,
-            limit_amount=limit_amount,
-            month=budget.month,
-            year=budget.year,
-            spent=spent,
-            remaining=remaining,
-        )
+        return self.enrich_multiple([budget], user_id)[0]

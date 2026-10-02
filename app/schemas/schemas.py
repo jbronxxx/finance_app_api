@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Generic, List, Optional, TypeVar
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.models.models import Category, TransactionType
 
@@ -97,13 +97,30 @@ class UserRegister(BaseModel):
 
     Атрибуты:
         email (EmailStr): Адрес электронной почты пользователя.
-        password (str): Пароль пользователя.
+        password (str): Пароль пользователя (от 6 до 72 символов, минимум 1 буква и 1 цифра).
         name (str): Имя пользователя.
     """
 
     email: EmailStr = Field(..., description="Email адрес пользователя")
-    password: str = Field(..., min_length=6, description="Пароль пользователя (минимум 6 символов)")
+    password: str = Field(
+        ...,
+        min_length=6,
+        max_length=72,
+        description="Пароль пользователя (от 6 до 72 символов, минимум 1 буква и 1 цифра)",
+    )
     name: str = Field(..., min_length=1, max_length=100, description="Имя пользователя")
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_complexity(cls, v: str) -> str:
+        """Проверяет пароль на наличие букв и цифр, а также ограничение длины bcrypt (72 байта)."""
+        if len(v.encode("utf-8")) > 72:
+            raise ValueError("Длина пароля не должна превышать 72 байта")
+        has_letter = any(c.isalpha() for c in v)
+        has_digit = any(c.isdigit() for c in v)
+        if not (has_letter and has_digit):
+            raise ValueError("Пароль должен содержать как минимум одну букву и одну цифру")
+        return v
 
 
 class UserLogin(BaseModel):
@@ -111,11 +128,11 @@ class UserLogin(BaseModel):
 
     Атрибуты:
         email (EmailStr): Зарегистрированный адрес электронной почты.
-        password (str): Пароль пользователя.
+        password (str): Пароль пользователя (до 72 символов).
     """
 
     email: EmailStr = Field(..., description="Email адрес пользователя")
-    password: str = Field(..., description="Пароль пользователя")
+    password: str = Field(..., max_length=72, description="Пароль пользователя")
 
 
 class RefreshTokenRequest(BaseModel):

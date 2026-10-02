@@ -44,6 +44,9 @@ class ErrorCode(StrEnum):
     # Синхронизация
     SYNC_FAILED = "SYNC_FAILED"
 
+    # Безопасность и лимиты
+    RATE_LIMIT_EXCEEDED = "RATE_LIMIT_EXCEEDED"
+
 
 class AppException(HTTPException):
     """Базовое доменное исключение приложения.

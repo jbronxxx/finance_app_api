@@ -1,9 +1,10 @@
 """Эндпоинты формирования персональной AI-аналитики и рекомендаций."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.limiter import limiter
 from app.models.models import User
 from app.schemas.schemas import ApiResponse, ErrorResponse, InsightResponse
 from app.services.ai_service import AIService
@@ -13,6 +14,7 @@ router = APIRouter(
     responses={
         401: {"model": ErrorResponse, "description": "Требуется авторизация"},
         403: {"model": ErrorResponse, "description": "Доступ запрещен"},
+        429: {"model": ErrorResponse, "description": "Превышен лимит частоты запросов"},
         500: {"model": ErrorResponse, "description": "Внутренняя ошибка сервера"},
     }
 )
@@ -23,7 +25,9 @@ router = APIRouter(
     response_model=ApiResponse[InsightResponse],
     summary="Получить AI-рекомендации по расходам",
 )
+@limiter.limit("10/minute")
 async def get_insights(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -33,6 +37,7 @@ async def get_insights(
     Если API ключ не задан, возвращает демонстрационные заглушки.
 
     Аргументы:
+        request (Request): Объект входящего HTTP запроса (для rate limiting).
         db (Session): Сессия базы данных (инъекция через Depends).
         current_user (User): Текущий аутентифицированный пользователь.
 

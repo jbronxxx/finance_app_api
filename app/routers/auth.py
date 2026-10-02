@@ -1,10 +1,11 @@
 """Эндпоинты авторизации и аутентификации пользователей."""
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.limiter import limiter
 from app.models.models import User
 from app.schemas.schemas import (
     ApiResponse,
@@ -25,6 +26,7 @@ router = APIRouter(
         403: {"model": ErrorResponse, "description": "Доступ запрещен"},
         404: {"model": ErrorResponse, "description": "Ресурс не найден"},
         422: {"model": ErrorResponse, "description": "Ошибка валидации данных"},
+        429: {"model": ErrorResponse, "description": "Превышен лимит частоты запросов"},
         500: {"model": ErrorResponse, "description": "Внутренняя ошибка сервера"},
     }
 )
@@ -36,10 +38,12 @@ router = APIRouter(
     status_code=status.HTTP_201_CREATED,
     summary="Регистрация нового пользователя",
 )
-def register(payload: UserRegister, db: Session = Depends(get_db)) -> dict[str, str | User]:
+@limiter.limit("5/minute")
+def register(request: Request, payload: UserRegister, db: Session = Depends(get_db)) -> dict[str, str | User]:
     """Зарегистрировать нового пользователя в системе.
 
     Аргументы:
+        request (Request): Объект входящего HTTP запроса (для rate limiting).
         payload (UserRegister): Данные для регистрации (email, пароль, имя).
         db (Session): Сессия базы данных.
 
@@ -56,10 +60,12 @@ def register(payload: UserRegister, db: Session = Depends(get_db)) -> dict[str, 
     response_model=ApiResponse[TokenResponse],
     summary="Вход в систему и получение токенов",
 )
-def login(payload: UserLogin, db: Session = Depends(get_db)) -> dict[str, str | TokenResponse]:
+@limiter.limit("5/minute")
+def login(request: Request, payload: UserLogin, db: Session = Depends(get_db)) -> dict[str, str | TokenResponse]:
     """Аутентификация пользователя по email и паролю с возвратом JWT access и refresh токенов.
 
     Аргументы:
+        request (Request): Объект входящего HTTP запроса (для rate limiting).
         payload (UserLogin): Учетные данные пользователя (email, пароль).
         db (Session): Сессия базы данных.
 

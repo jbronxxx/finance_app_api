@@ -52,11 +52,12 @@ class TestTransactions:
         response = client.get("/api/v1/transactions/")
         assert response.status_code == 403
 
-    def test_health_check(self):
-        """Эндпоинт /health всегда доступен публично и возвращает 200 OK."""
+    def test_health_check(self, client: TestClient):
+        """Эндпоинт /health всегда доступен публично и возвращает 200 OK при доступной БД."""
         response = client.get("/health")
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
+        assert response.json()["database"] == "healthy"
 
 
 class TestBudgets:

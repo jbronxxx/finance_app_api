@@ -16,6 +16,7 @@ class ErrorCode(StrEnum):
 
     # Общие системные ошибки
     INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR"
+    SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
     VALIDATION_ERROR = "VALIDATION_ERROR"
     NOT_FOUND = "NOT_FOUND"
     BAD_REQUEST = "BAD_REQUEST"
@@ -124,6 +125,23 @@ class NotFoundException(AppException):
         details: Optional[dict[str, Any]] = None,
     ):
         super().__init__(code=code, message=message, status_code=status.HTTP_404_NOT_FOUND, details=details)
+
+
+class ServiceUnavailableException(AppException):
+    """Исключение при недоступности сервиса или зависимости (HTTP 503)."""
+
+    def __init__(
+        self,
+        code: ErrorCode | str = ErrorCode.SERVICE_UNAVAILABLE,
+        message: str = "Сервис временно недоступен",
+        details: Optional[dict[str, Any]] = None,
+    ):
+        super().__init__(
+            code=code,
+            message=message,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            details=details,
+        )
 
 
 class BudgetLimitExceededException(AppException):

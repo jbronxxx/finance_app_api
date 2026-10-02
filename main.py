@@ -4,17 +4,21 @@
 жизненным циклом сервиса (lifespan).
 """
 
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException
 
+from app.database import get_db
 from app.exceptions import AppException, ErrorCode
 from app.routers import auth, budgets, insights, sync, transactions
 from app.schemas.schemas import ErrorResponse
-from logger.logger import get_logger
+from logger.logger import get_logger, reset_request_id, set_request_id
 
 logger = get_logger(__name__)
 
@@ -26,6 +30,7 @@ STATUS_CODE_TO_ERROR_CODE = {
     405: ErrorCode.METHOD_NOT_ALLOWED,
     422: ErrorCode.VALIDATION_ERROR,
     500: ErrorCode.INTERNAL_SERVER_ERROR,
+    503: ErrorCode.SERVICE_UNAVAILABLE,
 }
 
 
@@ -49,6 +54,19 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    """Middleware для сквозной трассировки запросов через X-Request-ID."""
+    request_id = request.headers.get("X-Request-ID") or request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
+    token = set_request_id(request_id)
+    try:
+        response: Response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+    finally:
+        reset_request_id(token)
 
 
 @app.exception_handler(AppException)
@@ -135,10 +153,30 @@ app.include_router(sync.router, prefix="/api/v1/sync", tags=["sync"])
 
 
 @app.get("/health", summary="Проверка работоспособности сервиса")
-async def health_check():
-    """Эндпоинт проверки здоровья и доступности API.
+async def health_check(db: Session = Depends(get_db)):
+    """Эндпоинт проверки здоровья и доступности API и базы данных PostgreSQL.
+
+    Выполняет проверочный запрос SELECT 1 к базе данных.
+    Если база данных недоступна, возвращает статус 503 Service Unavailable.
 
     Возвращает:
-        dict: Статус работы сервиса и текущую версию API.
+        dict: Статус работы сервиса, состояние БД и текущую версию API.
     """
-    return {"status": "ok", "version": "0.1.0"}
+    try:
+        db.execute(text("SELECT 1"))
+        return {
+            "status": "ok",
+            "version": "0.1.0",
+            "database": "healthy",
+        }
+    except Exception as exc:
+        logger.error(f"Healthcheck failed: база данных недоступна: {str(exc)}", exc_info=True)
+        return JSONResponse(
+            status_code=503,
+            content=ErrorResponse(
+                status="error",
+                code=ErrorCode.SERVICE_UNAVAILABLE,
+                message="База данных недоступна",
+                details={"database": "unhealthy"},
+            ).model_dump(exclude_none=True),
+        )

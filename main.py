@@ -41,6 +41,9 @@ STATUS_CODE_TO_ERROR_CODE = {
 }
 
 
+background_tasks = set()
+
+
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
     """Управление жизненным циклом приложения FastAPI.
@@ -54,6 +57,8 @@ async def lifespan(app_instance: FastAPI):
     validate_security_config(config)
     logger.info("Starting Finance App API")
     cleanup_task = asyncio.create_task(periodic_token_cleanup())
+    background_tasks.add(cleanup_task)
+    cleanup_task.add_done_callback(background_tasks.discard)
     yield
     cleanup_task.cancel()
     try:

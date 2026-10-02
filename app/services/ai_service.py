@@ -18,18 +18,20 @@ logger = get_logger(__name__)
 class AIService:
     """Сервис взаимодействия с LLM (Anthropic Claude) для анализа транзакций пользователя."""
 
-    def __init__(self, db: Session):
-        """Инициализация сервиса с сессией базы данных.
+    def __init__(self, db: Session, client: anthropic.AsyncAnthropic | None = None):
+        """Инициализация сервиса с сессией базы данных и асинхронным клиентом Anthropic.
 
         Аргументы:
             db (Session): Сессия SQLAlchemy.
+            client (anthropic.AsyncAnthropic, optional): Асинхронный клиент Anthropic Claude.
         """
         self.db = db
+        self.client = client or anthropic.AsyncAnthropic(api_key=config.anthropic_api_key or None)
 
     async def get_insights(self, user_id: uuid.UUID) -> InsightResponse:
         """Сформировать персональные рекомендации по расходам пользователя.
 
-        Если ключ API не указан или оставлен плейсхолдер — возвращаются информационные заглушки.
+        Если API ключ не указан или оставлен плейсхолдер — возвращаются информационные заглушки.
         Если транзакций нет — возвращается совет добавить первые операции.
 
         Аргументы:
@@ -107,8 +109,6 @@ class AIService:
         Возвращает:
             list[str]: Список полученных от нейросети советов.
         """
-        client = anthropic.Anthropic(api_key=config.anthropic_api_key)
-
         prompt = f"""Вот транзакции пользователя за последнее время:
 
 {summary}
@@ -117,7 +117,7 @@ class AIService:
 Ответь в формате JSON: {{"insights": ["совет 1", "совет 2", "совет 3"]}}
 Только JSON, без лишнего текста."""
 
-        message = client.messages.create(
+        message = await self.client.messages.create(
             model=config.ai_model,
             max_tokens=500,
             messages=[{"role": "user", "content": prompt}],

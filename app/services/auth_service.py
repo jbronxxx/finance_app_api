@@ -33,6 +33,8 @@ class AuthService:
 
     bearer_scheme = HTTPBearer()
 
+    _revoked_jtis: set[str] = set()
+
     def __init__(self, db: Session):
         """Инициализация сервиса с сессией базы данных.
 
@@ -108,7 +110,7 @@ class AuthService:
         self._deactivate_token(user_id, token_string)
 
     def create_access_token(self, user_id: Union[str, uuid.UUID]) -> str:
-        """Сгенерировать и сохранить в БД access_token для пользователя.
+        """Сгенерировать access_token для пользователя.
 
         Аргументы:
             user_id (str | uuid.UUID): Идентификатор пользователя.
@@ -117,7 +119,6 @@ class AuthService:
             str: Закодированный JWT access-токен.
         """
         user_id_str = str(user_id)
-        user_uuid = uuid.UUID(user_id_str) if isinstance(user_id, str) else user_id
         expire = datetime.now(timezone.utc) + timedelta(minutes=config.access_token_expire_minutes)
         payload = {
             "sub": user_id_str,
@@ -127,18 +128,7 @@ class AuthService:
         }
         logger.debug(f"Генерация access-токена для пользователя {user_id_str} (истекает: {expire})")
         token_str = jwt.encode(payload, config.secret_key, algorithm=config.algorithm)
-
-        db_token = Token(
-            user_id=user_uuid,
-            token=token_str,
-            expires_at=expire,
-            status="active",
-        )
-        self.db.add(db_token)
-        self.db.flush()
-        self.db.refresh(db_token)
-        logger.debug(f"Access-токен успешно сохранен в БД для пользователя {user_id_str}")
-        return db_token.token
+        return token_str
 
     def create_refresh_token(self, user_id: Union[str, uuid.UUID]) -> str:
         """Сгенерировать и сохранить в БД refresh_token для пользователя.
@@ -282,19 +272,21 @@ class AuthService:
             user_id (uuid.UUID): Идентификатор пользователя.
             token_string (str): Строка токена для деактивации.
         """
-        user_token = self.db.query(Token).filter(Token.user_id == user_id, Token.token == token_string).first()
+        try:
+            payload = jwt.decode(token_string, config.secret_key, algorithms=[config.algorithm])
+            jti = payload.get("jti")
+            if jti:
+                AuthService._revoked_jtis.add(jti)
+                logger.info(f"Токен успешно отзывен при выходе пользователя {user_id}")
+                return
+        except JWTError:
+            pass
 
-        if user_token:
-            logger.debug(f"Деактивация токена для пользователя {user_id}")
-            user_token.status = "revoked"
-            self.db.flush()
-            logger.info(f"Токен успешно отзывен при выходе пользователя {user_id}")
-        else:
-            logger.warning(f"Попытка отзыва несуществующего токена для пользователя {user_id}")
-            raise NotFoundException(
-                code=ErrorCode.TOKEN_NOT_FOUND,
-                message="Токен не найден для деактивации",
-            )
+        logger.warning(f"Попытка отзыва несуществующего токена для пользователя {user_id}")
+        raise NotFoundException(
+            code=ErrorCode.TOKEN_NOT_FOUND,
+            message="Токен не найден для деактивации",
+        )
 
     def cleanup_expired_tokens(self, retention_days: int = 30) -> int:
         """Удалить устаревшие токены, срок действия которых истек более retention_days назад,
@@ -345,6 +337,7 @@ def get_current_user(
         payload = jwt.decode(token, config.secret_key, algorithms=[config.algorithm])
         user_id = payload.get("sub")
         token_type = payload.get("type")
+        jti = payload.get("jti")
 
         if token_type and token_type != "access":
             logger.warning("Попытка аутентификации с использованием не-access токена")
@@ -375,25 +368,10 @@ def get_current_user(
             message="Недействительный токен авторизации",
         )
 
-    db_token = db.query(Token).filter(Token.token == token, Token.status == "active").first()
-
-    if not db_token:
+    if jti in AuthService._revoked_jtis:
         raise UnauthorizedException(
             code=ErrorCode.TOKEN_REVOKED,
             message="Токен отозван или недействителен",
-        )
-
-    token_expires_at = db_token.expires_at
-    if token_expires_at.tzinfo is None:
-        token_expires_at = token_expires_at.replace(tzinfo=timezone.utc)
-
-    if token_expires_at < datetime.now(timezone.utc):
-        db_token.status = "expired"
-        db.flush()
-        logger.warning(f"Истек срок действия access-токена в базе данных для пользователя {db_token.user_id}")
-        raise UnauthorizedException(
-            code=ErrorCode.EXPIRED_TOKEN,
-            message="Срок действия токена доступа истек",
         )
 
     user = db.query(User).filter(User.id == user_uuid).first()

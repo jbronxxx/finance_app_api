@@ -127,8 +127,10 @@ class TestAuthServiceUnit:
 
         service.logout(test_user.id, token_str)
 
-        token_record = db_session.query(Token).filter(Token.token == token_str).first()
-        assert token_record.status == "revoked"
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token_str)
+        with pytest.raises(UnauthorizedException) as exc_info:
+            get_current_user(credentials=creds, db=db_session)
+        assert exc_info.value.code == "TOKEN_REVOKED"
 
     def test_logout_nonexistent_token(self, db_session: Session, test_user: User):
         """Попытка деактивации несуществующего токена вызывает NotFoundException."""
@@ -164,17 +166,23 @@ class TestGetCurrentUserDependency:
 
     def test_expired_token(self, db_session: Session, test_user: User):
         """Истекший токен вызывает UnauthorizedException."""
-        service = AuthService(db_session)
-        token_str = service.create_access_token(test_user.id)
+        from jose import jwt
 
-        db_token = db_session.query(Token).filter(Token.token == token_str).first()
-        db_token.expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
-        db_session.commit()
+        from config_reader.config_reader import config
+
+        expire = datetime.now(timezone.utc) - timedelta(minutes=5)
+        payload = {
+            "sub": str(test_user.id),
+            "type": "access",
+            "exp": expire,
+            "jti": uuid.uuid4().hex,
+        }
+        token_str = jwt.encode(payload, config.secret_key, algorithm=config.algorithm)
 
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token_str)
         with pytest.raises(UnauthorizedException) as exc_info:
             get_current_user(credentials=creds, db=db_session)
-        assert exc_info.value.code == "EXPIRED_TOKEN"
+        assert exc_info.value.code == "INVALID_TOKEN"
 
 
 class TestAuthEndpointsIntegration:

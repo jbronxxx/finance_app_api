@@ -243,6 +243,7 @@ class BudgetResponse(BaseModel):
 class TransactionSyncItem(BaseModel):
     """Схема отдельной транзакции при пакетной синхронизации."""
 
+    id: Optional[uuid.UUID] = Field(default=None, description="ID транзакции на сервере (если транзакция уже существует)")
     local_id: Optional[int] = Field(default=None, description="Локальный ID на клиенте")
     type: TransactionType = Field(..., description="Тип операции")
     category: Category = Field(..., description="Категория")

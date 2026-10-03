@@ -151,12 +151,9 @@ class TestAIService:
     async def test_get_insights_no_transactions(self):
         """Если у пользователя нет транзакций, возвращается совет добавить первую транзакцию."""
         mock_db = MagicMock()
-        mock_query = MagicMock()
-        mock_db.query.return_value = mock_query
-        mock_query.filter.return_value = mock_query
-        mock_query.order_by.return_value = mock_query
-        mock_query.limit.return_value = mock_query
-        mock_query.all.return_value = []
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
         service = AIService(db=mock_db)
 
@@ -178,12 +175,9 @@ class TestAIService:
         tx1.description = "Супермаркет"
 
         mock_db = MagicMock()
-        mock_query = MagicMock()
-        mock_db.query.return_value = mock_query
-        mock_query.filter.return_value = mock_query
-        mock_query.order_by.return_value = mock_query
-        mock_query.limit.return_value = mock_query
-        mock_query.all.return_value = [tx1]
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [tx1]
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
         mock_client = MagicMock(spec=anthropic.AsyncAnthropic)
         mock_response = MagicMock()
@@ -215,12 +209,9 @@ class TestAIService:
         tx1.description = "Кофе"
 
         mock_db = MagicMock()
-        mock_query = MagicMock()
-        mock_db.query.return_value = mock_query
-        mock_query.filter.return_value = mock_query
-        mock_query.order_by.return_value = mock_query
-        mock_query.limit.return_value = mock_query
-        mock_query.all.return_value = [tx1]
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [tx1]
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
         mock_client = MagicMock(spec=anthropic.AsyncAnthropic)
         mock_client.messages = MagicMock()
@@ -286,12 +277,9 @@ class TestAIService:
         tx.description = "Метро"
 
         mock_db = MagicMock()
-        mock_query = MagicMock()
-        mock_db.query.return_value = mock_query
-        mock_query.filter.return_value = mock_query
-        mock_query.order_by.return_value = mock_query
-        mock_query.limit.return_value = mock_query
-        mock_query.all.return_value = [tx]
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [tx]
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
         mock_client = MagicMock(spec=anthropic.AsyncAnthropic)
         mock_response = MagicMock()
@@ -330,13 +318,22 @@ class TestAIService:
         tx1.amount = 150.0
         tx1.description = "Метро"
 
+        # Пользователь совершил новую транзакцию
+        tx2 = MagicMock(spec=Transaction)
+        tx2.date = datetime(2026, 10, 2, 11, 0)
+        tx2.type = TransactionType.expense
+        tx2.category = Category.shopping
+        tx2.amount = 5000.0
+        tx2.description = "Одежда"
+
         mock_db = MagicMock()
-        mock_query = MagicMock()
-        mock_db.query.return_value = mock_query
-        mock_query.filter.return_value = mock_query
-        mock_query.order_by.return_value = mock_query
-        mock_query.limit.return_value = mock_query
-        mock_query.all.return_value = [tx1]
+        mock_result1 = MagicMock()
+        mock_result1.scalars.return_value.all.return_value = [tx1]
+
+        mock_result2 = MagicMock()
+        mock_result2.scalars.return_value.all.return_value = [tx2, tx1]
+
+        mock_db.execute = AsyncMock(side_effect=[mock_result1, mock_result2])
 
         mock_client = MagicMock(spec=anthropic.AsyncAnthropic)
         mock_response1 = MagicMock()
@@ -359,15 +356,7 @@ class TestAIService:
             assert first_resp.insights == ["Совет 1"]
             assert mock_client.messages.create.await_count == 1
 
-            # Пользователь совершил новую транзакцию
-            tx2 = MagicMock(spec=Transaction)
-            tx2.date = datetime(2026, 10, 2, 11, 0)
-            tx2.type = TransactionType.expense
-            tx2.category = Category.shopping
-            tx2.amount = 5000.0
-            tx2.description = "Одежда"
-
-            mock_query.all.return_value = [tx2, tx1]
+            # The mock automatically uses mock_result2 when get_insights is called the second time
 
             second_resp = await service.get_insights(user_id)
             assert second_resp.insights == ["Совет 2 - траты выросли"]

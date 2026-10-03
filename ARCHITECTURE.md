@@ -12,7 +12,7 @@
 
 * **Репозиторий**: `jbronxxx/finance_app_api`
 * **Фреймворк**: FastAPI (Python 3.11+)
-* **База данных и ORM**: PostgreSQL 16, SQLAlchemy 2.0 (Sync Session)
+* **База данных и ORM**: PostgreSQL 16, SQLAlchemy 2.0 (Async Session, asyncpg)
 * **Миграции**: Alembic
 * **Валидация и DTO**: Pydantic v2 (`ConfigDict`, `Field`)
 * **Аутентификация**: JWT (`python-jose`), хеширование паролей (`bcrypt`), ротация Refresh-токенов
@@ -44,7 +44,7 @@ flowchart TD
 1. **API Routers (`app/routers/`)**: Прием и диспетчеризация HTTP-запросов, проверка прав доступа, сериализация ответов в единые форматы `ApiResponse[T]` и `ErrorResponse`. Сложной бизнес-логики не содержат.
 2. **Service Layer (`app/services/`)**: Вся предметная логика, расчеты бюджетов, криптография, ротация токенов, интеграция с внешними LLM API и кэширование аналитики.
 3. **Schemas (`app/schemas/`)**: Pydantic-схемы валидации входящих данных (Request DTO) и структуры ответов (Response DTO).
-4. **Data Layer (`app/models/`, `app/database.py`)**: Определение схемы реляционных таблиц через декларативные модели SQLAlchemy 2.0 и управление жизненным циклом сессий `SessionLocal`.
+4. **Data Layer (`app/models/`, `app/database.py`)**: Определение схемы реляционных таблиц через декларативные модели SQLAlchemy 2.0 и управление жизненным циклом сессий `async_session_maker`.
 
 ---
 

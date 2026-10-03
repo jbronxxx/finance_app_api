@@ -1,5 +1,7 @@
 """Сервис аутентификации, авторизации и управления пользователями."""
 
+import asyncio
+import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Union
@@ -8,7 +10,8 @@ import bcrypt
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.exceptions import (
@@ -35,27 +38,16 @@ class AuthService:
 
     _revoked_jtis: set[str] = set()
 
-    def __init__(self, db: Session):
-        """Инициализация сервиса с сессией базы данных.
-
-        Аргументы:
-            db (Session): Активная сессия SQLAlchemy.
-        """
+    def __init__(self, db: AsyncSession):
+        """Инициализация сервиса с сессией базы данных."""
         self.db = db
 
     async def register(self, payload: UserRegister) -> User:
-        """Зарегистрировать нового пользователя в системе.
+        """Зарегистрировать нового пользователя в системе."""
+        query = select(User).where(User.email == payload.email)
+        result = await self.db.execute(query)
+        existing = result.scalar_one_or_none()
 
-        Аргументы:
-            payload (UserRegister): Данные нового пользователя (email, пароль, имя).
-
-        Возвращает:
-            User: Созданный объект пользователя из базы данных.
-
-        Исключения:
-            BadRequestException (400): Если пользователь с указанным email уже существует.
-        """
-        existing = self.db.query(User).filter(User.email == payload.email).first()
         if existing:
             logger.warning(f"Попытка регистрации с уже зарегистрированным email: {payload.email}")
             raise BadRequestException(
@@ -63,31 +55,20 @@ class AuthService:
                 message="Пользователь с таким email уже зарегистрирован",
             )
 
-        import asyncio
-
         hashed_bytes = await asyncio.to_thread(bcrypt.hashpw, payload.password.encode(), bcrypt.gensalt())
         hashed = hashed_bytes.decode()
         user = User(email=payload.email, hashed_password=hashed, name=payload.name)
         self.db.add(user)
-        self.db.flush()
-        self.db.refresh(user)
+        await self.db.flush()
+        await self.db.refresh(user)
         logger.info(f"Зарегистрирован новый пользователь: {user.email} (ID: {user.id})")
         return user
 
     async def login(self, payload: UserLogin) -> TokenResponse:
-        """Аутентифицировать пользователя и выдать JWT access и refresh токены.
-
-        Аргументы:
-            payload (UserLogin): Учетные данные пользователя (email, пароль).
-
-        Возвращает:
-            TokenResponse: Объект, содержащий сгенерированные access и refresh токены.
-
-        Исключения:
-            UnauthorizedException (401): Если email не найден или пароль не совпадает.
-        """
-        user = self.db.query(User).filter(User.email == payload.email).first()
-        import asyncio
+        """Аутентифицировать пользователя и выдать JWT access и refresh токены."""
+        query = select(User).where(User.email == payload.email)
+        result = await self.db.execute(query)
+        user = result.scalar_one_or_none()
 
         is_valid = False
         if user:
@@ -101,7 +82,7 @@ class AuthService:
             )
 
         access_token = self.create_access_token(user.id)
-        refresh_token = self.create_refresh_token(user.id)
+        refresh_token = await self.create_refresh_token(user.id)
         logger.info(f"Пользователь успешно авторизован: {user.email}")
         return TokenResponse(
             access_token=access_token,
@@ -110,23 +91,11 @@ class AuthService:
         )
 
     def logout(self, user_id: uuid.UUID, token_string: str) -> None:
-        """Выйти из системы, деактивируя токен в базе данных.
-
-        Аргументы:
-            user_id (uuid.UUID): Идентификатор пользователя.
-            token_string (str): Строка токена для деактивации.
-        """
+        """Выйти из системы, деактивируя токен в памяти."""
         self._deactivate_token(user_id, token_string)
 
     def create_access_token(self, user_id: Union[str, uuid.UUID]) -> str:
-        """Сгенерировать access_token для пользователя.
-
-        Аргументы:
-            user_id (str | uuid.UUID): Идентификатор пользователя.
-
-        Возвращает:
-            str: Закодированный JWT access-токен.
-        """
+        """Сгенерировать access_token для пользователя."""
         user_id_str = str(user_id)
         expire = datetime.now(timezone.utc) + timedelta(minutes=config.access_token_expire_minutes)
         payload = {
@@ -139,15 +108,8 @@ class AuthService:
         token_str = jwt.encode(payload, config.secret_key, algorithm=config.algorithm)
         return token_str
 
-    def create_refresh_token(self, user_id: Union[str, uuid.UUID]) -> str:
-        """Сгенерировать и сохранить в БД refresh_token для пользователя.
-
-        Аргументы:
-            user_id (str | uuid.UUID): Идентификатор пользователя.
-
-        Возвращает:
-            str: Закодированный JWT refresh-токен.
-        """
+    async def create_refresh_token(self, user_id: Union[str, uuid.UUID]) -> str:
+        """Сгенерировать и сохранить в БД refresh_token для пользователя."""
         user_id_str = str(user_id)
         user_uuid = uuid.UUID(user_id_str) if isinstance(user_id, str) else user_id
         expire = datetime.now(timezone.utc) + timedelta(days=config.refresh_token_expire_days)
@@ -160,8 +122,6 @@ class AuthService:
         logger.debug(f"Генерация refresh-токена для пользователя {user_id_str} (истекает: {expire})")
         refresh_token_str = jwt.encode(payload, config.secret_key, algorithm=config.algorithm)
 
-        import hashlib
-
         hashed_token = hashlib.sha256(refresh_token_str.encode()).hexdigest()
 
         db_token = Token(
@@ -171,23 +131,13 @@ class AuthService:
             status="active",
         )
         self.db.add(db_token)
-        self.db.flush()
-        self.db.refresh(db_token)
+        await self.db.flush()
+        await self.db.refresh(db_token)
         logger.debug(f"Refresh-токен успешно сохранен в БД для пользователя {user_id_str}")
         return refresh_token_str
 
-    def refresh_tokens(self, refresh_token_string: str) -> TokenResponse:
-        """Обновить access_token и получить новый refresh_token по существующему refresh_token.
-
-        Аргументы:
-            refresh_token_string (str): Действующий JWT refresh-токен.
-
-        Возвращает:
-            TokenResponse: Новые access_token и refresh_token.
-
-        Исключения:
-            UnauthorizedException (401): Если токен недействителен, истек или отозван.
-        """
+    async def refresh_tokens(self, refresh_token_string: str) -> TokenResponse:
+        """Обновить access_token и получить новый refresh_token по существующему refresh_token."""
         try:
             payload = jwt.decode(refresh_token_string, config.secret_key, algorithms=[config.algorithm])
             user_id = payload.get("sub")
@@ -213,10 +163,10 @@ class AuthService:
                 message="Недействительный или истекший refresh токен",
             )
 
-        import hashlib
-
         hashed_token = hashlib.sha256(refresh_token_string.encode()).hexdigest()
-        db_token = self.db.query(Token).filter(Token.token_hash == hashed_token, Token.status == "active").first()
+        query = select(Token).where(Token.token_hash == hashed_token, Token.status == "active")
+        result = await self.db.execute(query)
+        db_token = result.scalar_one_or_none()
 
         if not db_token:
             logger.warning("Refresh-токен отсутствует в базе данных либо неактивен")
@@ -231,7 +181,7 @@ class AuthService:
 
         if token_expires_at < datetime.now(timezone.utc):
             db_token.status = "expired"
-            self.db.flush()
+            await self.db.flush()
             logger.warning(f"Истек срок действия refresh-токена в базе данных для пользователя {db_token.user_id}")
             raise UnauthorizedException(
                 code=ErrorCode.EXPIRED_TOKEN,
@@ -254,7 +204,10 @@ class AuthService:
                 message="Недействительный refresh токен",
             )
 
-        user = self.db.query(User).filter(User.id == user_uuid).first()
+        user_query = select(User).where(User.id == user_uuid)
+        user_result = await self.db.execute(user_query)
+        user = user_result.scalar_one_or_none()
+
         if not user:
             logger.warning(f"Пользователь с ID {db_token.user_id} не найден при ротации токенов")
             raise UnauthorizedException(
@@ -264,11 +217,11 @@ class AuthService:
 
         # Ротация refresh-токена: деактивируем старый refresh_token
         db_token.status = "revoked"
-        self.db.flush()
+        await self.db.flush()
 
         # Генерируем новую пару токенов
         new_access_token = self.create_access_token(user.id)
-        new_refresh_token = self.create_refresh_token(user.id)
+        new_refresh_token = await self.create_refresh_token(user.id)
 
         logger.info(f"Успешная ротация токенов для пользователя: {user.email}")
         return TokenResponse(
@@ -282,12 +235,7 @@ class AuthService:
         return self.create_access_token(user_id)
 
     def _deactivate_token(self, user_id: uuid.UUID, token_string: str) -> None:
-        """Деактивировать токен (при выходе пользователя).
-
-        Аргументы:
-            user_id (uuid.UUID): Идентификатор пользователя.
-            token_string (str): Строка токена для деактивации.
-        """
+        """Деактивировать токен (при выходе пользователя)."""
         try:
             payload = jwt.decode(token_string, config.secret_key, algorithms=[config.algorithm])
             jti = payload.get("jti")
@@ -304,49 +252,28 @@ class AuthService:
             message="Токен не найден для деактивации",
         )
 
-    def cleanup_expired_tokens(self, retention_days: int = 30) -> int:
-        """Удалить устаревшие токены, срок действия которых истек более retention_days назад,
+    async def cleanup_expired_tokens(self, retention_days: int = 30) -> int:
+        """Удалить устаревшие токены."""
+        from sqlalchemy import delete
 
-        или токены со статусом revoked/expired старше указанного порога.
-
-        Аргументы:
-            retention_days (int): Количество дней хранения истекших токенов (по умолчанию 30).
-
-        Возвращает:
-            int: Количество удаленных записей токенов.
-        """
         threshold = datetime.now(timezone.utc) - timedelta(days=retention_days)
-        deleted_count = (
-            self.db.query(Token)
-            .filter(
-                (Token.expires_at < threshold) | (Token.status.in_(["expired", "revoked"]) & (Token.created_at < threshold))
-            )
-            .delete(synchronize_session=False)
+
+        query = delete(Token).where(
+            (Token.expires_at < threshold) | (Token.status.in_(["expired", "revoked"]) & (Token.created_at < threshold))
         )
-        self.db.flush()
+
+        result = await self.db.execute(query)
+        await self.db.flush()
+        deleted_count = result.rowcount
         logger.info(f"Очистка токенов: удалено {deleted_count} устаревших токенов (порог: {threshold.isoformat()})")
         return deleted_count
 
 
-def get_current_user(
+async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Зависимость FastAPI (Dependency) для получения текущего авторизованного пользователя.
-
-    Извлекает Bearer-токен из заголовка Authorization, валидирует подпись и срок действия,
-    после чего загружает сущность пользователя из БД.
-
-    Аргументы:
-        credentials (HTTPAuthorizationCredentials): Учетные данные из заголовка Bearer.
-        db (Session): Сессия базы данных.
-
-    Возвращает:
-        User: Сущность авторизованного пользователя.
-
-    Исключения:
-        UnauthorizedException (401): Если токен невалиден, истек или пользователь не найден.
-    """
+    """Зависимость FastAPI (Dependency) для получения текущего авторизованного пользователя."""
     token = credentials.credentials
 
     try:
@@ -390,7 +317,9 @@ def get_current_user(
             message="Токен отозван или недействителен",
         )
 
-    user = db.query(User).filter(User.id == user_uuid).first()
+    query = select(User).where(User.id == user_uuid)
+    result = await db.execute(query)
+    user = result.scalar_one_or_none()
 
     if not user:
         logger.warning(f"Пользователь с ID {user_id} из токена не найден в базы данных")

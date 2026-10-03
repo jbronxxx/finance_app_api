@@ -95,6 +95,13 @@ erDiagram
     }
 ```
 
+### Таблицы:
+* `users`: Пользователи системы (email, хешированный пароль, имя)
+* `tokens`: JWT access и refresh токены сессий пользователей с отслеживанием статуса (`active`, `revoked`, `expired`)
+* `transactions`: Финансовые операции (доход/расход с категорией и датой)
+* `budgets`: Лимиты расходов по категориям (по месяцам и годам)
+* `alembic_version`: Служебная таблица для отслеживания миграций
+
 ---
 
 ## 4. Структура каталогов
@@ -158,6 +165,7 @@ finance_app/
 ├── requirements-dev.txt        # Зависимости для тестирования и разработки
 ├── RESPONSE_FORMAT.md          # Спецификация форматов ответов API
 ├── ARCHITECTURE.md             # Архитектурная документация сервиса
+├── TEST_CHECKLIST.md           # Чек-лист проверок (автотесты и QA)
 └── TASKS.md                    # Полный реестр багов и задач
 ```
 
@@ -222,27 +230,4 @@ finance_app/
 * **Временные метки в UTC**: Все генерируемые ответы содержат timezone-aware временные метки `datetime.now(timezone.utc)`.
 * **Заглушки при отсутствии ключа**: При пустом или тестовом ключе `ANTHROPIC_API_KEY` (например, `sk-ant-your-key...`) возвращается информационная заглушка `InsightResponse(insights=["В разработке..."])`.
 
----
 
-## 7. Развертывание, запуск и поддержка
-
-### Локальный запуск
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
-
-cp .env.example .env
-alembic upgrade head
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-### Запуск в Docker
-```bash
-docker-compose up --build -d
-```
-
-### Запуск автотестов
-```bash
-pytest tests/ -v
-```

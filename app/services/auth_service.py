@@ -43,7 +43,7 @@ class AuthService:
         """
         self.db = db
 
-    def register(self, payload: UserRegister) -> User:
+    async def register(self, payload: UserRegister) -> User:
         """Зарегистрировать нового пользователя в системе.
 
         Аргументы:
@@ -63,7 +63,10 @@ class AuthService:
                 message="Пользователь с таким email уже зарегистрирован",
             )
 
-        hashed = bcrypt.hashpw(payload.password.encode(), bcrypt.gensalt()).decode()
+        import asyncio
+
+        hashed_bytes = await asyncio.to_thread(bcrypt.hashpw, payload.password.encode(), bcrypt.gensalt())
+        hashed = hashed_bytes.decode()
         user = User(email=payload.email, hashed_password=hashed, name=payload.name)
         self.db.add(user)
         self.db.flush()
@@ -71,7 +74,7 @@ class AuthService:
         logger.info(f"Зарегистрирован новый пользователь: {user.email} (ID: {user.id})")
         return user
 
-    def login(self, payload: UserLogin) -> TokenResponse:
+    async def login(self, payload: UserLogin) -> TokenResponse:
         """Аутентифицировать пользователя и выдать JWT access и refresh токены.
 
         Аргументы:
@@ -84,7 +87,13 @@ class AuthService:
             UnauthorizedException (401): Если email не найден или пароль не совпадает.
         """
         user = self.db.query(User).filter(User.email == payload.email).first()
-        if not user or not bcrypt.checkpw(payload.password.encode(), user.hashed_password.encode()):
+        import asyncio
+
+        is_valid = False
+        if user:
+            is_valid = await asyncio.to_thread(bcrypt.checkpw, payload.password.encode(), user.hashed_password.encode())
+
+        if not user or not is_valid:
             logger.warning(f"Неуспешная попытка входа для email: {payload.email}")
             raise UnauthorizedException(
                 code=ErrorCode.INVALID_CREDENTIALS,

@@ -39,7 +39,7 @@ router = APIRouter(
     summary="Регистрация нового пользователя",
 )
 @limiter.limit("5/minute")
-def register(request: Request, payload: UserRegister, db: Session = Depends(get_db)) -> dict[str, str | User]:
+async def register(request: Request, payload: UserRegister, db: Session = Depends(get_db)) -> dict[str, str | User]:
     """Зарегистрировать нового пользователя в системе.
 
     Аргументы:
@@ -51,7 +51,7 @@ def register(request: Request, payload: UserRegister, db: Session = Depends(get_
         ApiResponse[UserResponse]: Созданный профиль пользователя.
     """
     service = AuthService(db)
-    user = service.register(payload)
+    user = await service.register(payload)
     return {"status": "success", "data": user}
 
 
@@ -61,7 +61,7 @@ def register(request: Request, payload: UserRegister, db: Session = Depends(get_
     summary="Вход в систему и получение токенов",
 )
 @limiter.limit("5/minute")
-def login(request: Request, payload: UserLogin, db: Session = Depends(get_db)) -> dict[str, str | TokenResponse]:
+async def login(request: Request, payload: UserLogin, db: Session = Depends(get_db)) -> dict[str, str | TokenResponse]:
     """Аутентификация пользователя по email и паролю с возвратом JWT access и refresh токенов.
 
     Аргументы:
@@ -73,7 +73,7 @@ def login(request: Request, payload: UserLogin, db: Session = Depends(get_db)) -
         ApiResponse[TokenResponse]: Пара токенов access_token и refresh_token.
     """
     service = AuthService(db)
-    tokens = service.login(payload)
+    tokens = await service.login(payload)
     return {"status": "success", "data": tokens}
 
 

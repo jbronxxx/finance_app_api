@@ -16,7 +16,8 @@ from app.services.auth_service import AuthService, get_current_user
 class TestAuthServiceUnit:
     """Юнит-тесты бизнес-логики AuthService."""
 
-    def test_register_success(self, db_session: Session):
+    @pytest.mark.asyncio
+    async def test_register_success(self, db_session: Session):
         """Успешная регистрация нового пользователя."""
         service = AuthService(db_session)
         payload = UserRegister(
@@ -24,14 +25,15 @@ class TestAuthServiceUnit:
             password="SecurePassword123!",
             name="New User",
         )
-        user = service.register(payload)
+        user = await service.register(payload)
 
         assert user.id is not None
         assert user.email == payload.email
         assert user.name == payload.name
         assert user.hashed_password != payload.password
 
-    def test_register_duplicate_email(self, db_session: Session, test_user: User):
+    @pytest.mark.asyncio
+    async def test_register_duplicate_email(self, db_session: Session, test_user: User):
         """Регистрация с существующим email вызывает BadRequestException."""
         service = AuthService(db_session)
         payload = UserRegister(
@@ -40,33 +42,36 @@ class TestAuthServiceUnit:
             name="Duplicate User",
         )
         with pytest.raises(BadRequestException) as exc_info:
-            service.register(payload)
+            await service.register(payload)
         assert exc_info.value.code == "USER_ALREADY_EXISTS"
 
-    def test_login_success(self, db_session: Session):
+    @pytest.mark.asyncio
+    async def test_login_success(self, db_session: Session):
         """Успешный вход пользователя с валидными учетными данными."""
         service = AuthService(db_session)
         email = f"logintest_{uuid.uuid4().hex[:6]}@example.com"
         password = "ValidPassword123!"
-        service.register(UserRegister(email=email, password=password, name="Login User"))
+        await service.register(UserRegister(email=email, password=password, name="Login User"))
 
-        tokens = service.login(UserLogin(email=email, password=password))
+        tokens = await service.login(UserLogin(email=email, password=password))
         assert tokens.access_token is not None
         assert tokens.refresh_token is not None
         assert tokens.token_type == "bearer"
 
-    def test_login_invalid_password(self, db_session: Session, test_user: User):
+    @pytest.mark.asyncio
+    async def test_login_invalid_password(self, db_session: Session, test_user: User):
         """Попытка входа с неверным паролем вызывает UnauthorizedException."""
         service = AuthService(db_session)
         with pytest.raises(UnauthorizedException) as exc_info:
-            service.login(UserLogin(email=test_user.email, password="WrongPassword!"))
+            await service.login(UserLogin(email=test_user.email, password="WrongPassword!"))
         assert exc_info.value.code == "INVALID_CREDENTIALS"
 
-    def test_login_nonexistent_user(self, db_session: Session):
+    @pytest.mark.asyncio
+    async def test_login_nonexistent_user(self, db_session: Session):
         """Попытка входа с несуществующим email вызывает UnauthorizedException."""
         service = AuthService(db_session)
         with pytest.raises(UnauthorizedException) as exc_info:
-            service.login(UserLogin(email="nonexistent@example.com", password="Password123!"))
+            await service.login(UserLogin(email="nonexistent@example.com", password="Password123!"))
         assert exc_info.value.code == "INVALID_CREDENTIALS"
 
     def test_refresh_tokens_success(self, db_session: Session, test_user: User):
@@ -212,11 +217,12 @@ class TestAuthEndpointsIntegration:
         assert data["data"]["name"] == payload["name"]
         assert "hashed_password" not in data["data"]
 
-    def test_login_and_me_endpoint(self, client, db_session: Session):
+    @pytest.mark.asyncio
+    async def test_login_and_me_endpoint(self, client, db_session: Session):
         """POST /api/v1/auth/login возвращает токены, GET /api/v1/auth/me возвращает профиль."""
         email = f"flow_user_{uuid.uuid4().hex[:6]}@example.com"
         password = "Password123!"
-        AuthService(db_session).register(UserRegister(email=email, password=password, name="Flow User"))
+        await AuthService(db_session).register(UserRegister(email=email, password=password, name="Flow User"))
 
         # Login
         login_res = client.post("/api/v1/auth/login", json={"email": email, "password": password})

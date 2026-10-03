@@ -59,13 +59,21 @@ GRAFANA_ADMIN_PASSWORD=admin
 > [!NOTE]
 > Если ключ `ANTHROPIC_API_KEY` не указан или оставлен пустым, сервис AI-инсайтов автоматически переключится на безопасный режим заглушек и приложение продолжит работать без ошибок.
 
-### 2. Запуск контейнеров
+### 2. Запуск контейнеров (Локальная разработка)
 ```bash
-# Сборка и запуск в фоновом режиме
+# Сборка и запуск в фоновом режиме (без Nginx)
 docker compose up --build -d
 ```
 
-### 3. Просмотр логов
+### 3. Запуск в Production (на боевом сервере с Nginx и SSL)
+Для запуска на боевом сервере с Reverse Proxy (Nginx) и сертификатами (Certbot):
+1. Отредактируйте файл `nginx/conf.d/default.conf` и замените `example.com` на ваш домен.
+2. Запустите Docker, склеив основной и production конфигурации:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
+```
+
+### 4. Просмотр логов
 ```bash
 # Логи всех сервисов
 docker compose logs -f
@@ -74,7 +82,7 @@ docker compose logs -f
 docker compose logs -f api
 ```
 
-### 4. Остановка контейнеров
+### 5. Остановка контейнеров
 ```bash
 # Остановка сервисов
 docker compose down

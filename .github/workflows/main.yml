@@ -29,8 +29,8 @@ jobs:
 
       - name: Check code formatting (black & isort)
         run: |
-          black --check .
-          isort --check-only .
+          black --check --line-length=125 .
+          isort --check-only --profile=black .
 
       - name: Lint with flake8
         run: |

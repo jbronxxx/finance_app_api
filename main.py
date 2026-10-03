@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException
 
 from app.database import get_db
@@ -201,7 +201,7 @@ app.include_router(sync.router, prefix="/api/v1/sync", tags=["sync"])
 
 
 @app.get("/health", summary="Проверка работоспособности сервиса")
-async def health_check(db: Session = Depends(get_db)):
+async def health_check(db: AsyncSession = Depends(get_db)):
     """Эндпоинт проверки здоровья и доступности API и базы данных PostgreSQL.
 
     Выполняет проверочный запрос SELECT 1 к базе данных.
@@ -211,7 +211,7 @@ async def health_check(db: Session = Depends(get_db)):
         dict: Статус работы сервиса, состояние БД и текущую версию API.
     """
     try:
-        db.execute(text("SELECT 1"))
+        await db.execute(text("SELECT 1"))
         return {
             "status": "ok",
             "version": "0.1.0",

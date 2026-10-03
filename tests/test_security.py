@@ -8,7 +8,7 @@
 """
 
 import pytest
-from fastapi.testclient import TestClient
+from httpx import AsyncClient
 
 from app.exceptions import ErrorCode
 from app.limiter import limiter
@@ -31,9 +31,10 @@ def reset_rate_limiter():
 class TestCorsMiddleware:
     """Тестирование работы CORSMiddleware."""
 
-    def test_cors_headers_present_on_get_request(self, client: TestClient):
+    @pytest.mark.asyncio
+    async def test_cors_headers_present_on_get_request(self, client: AsyncClient):
         """Проверяет наличие CORS-заголовков в ответе на обычный GET запрос."""
-        response = client.get(
+        response = await client.get(
             "/health",
             headers={"Origin": "http://localhost:3000"},
         )
@@ -41,9 +42,10 @@ class TestCorsMiddleware:
         assert "access-control-allow-origin" in response.headers
         assert response.headers["access-control-allow-origin"] in ("*", "http://localhost:3000")
 
-    def test_cors_preflight_options_request(self, client: TestClient):
+    @pytest.mark.asyncio
+    async def test_cors_preflight_options_request(self, client: AsyncClient):
         """Проверяет корректный ответ сервера на предварительный preflight (OPTIONS) запрос."""
-        response = client.options(
+        response = await client.options(
             "/api/v1/auth/login",
             headers={
                 "Origin": "http://localhost:3000",
@@ -60,7 +62,8 @@ class TestCorsMiddleware:
 class TestPasswordValidation:
     """Тестирование правил валидации и сложности паролей."""
 
-    def test_register_password_without_numbers_rejected(self):
+    @pytest.mark.asyncio
+    async def test_register_password_without_numbers_rejected(self):
         """Проверяет отклонение пароля без цифр."""
         with pytest.raises(ValueError, match="Пароль должен содержать как минимум одну букву и одну цифру"):
             UserRegister(
@@ -69,7 +72,8 @@ class TestPasswordValidation:
                 name="Test User",
             )
 
-    def test_register_password_without_letters_rejected(self):
+    @pytest.mark.asyncio
+    async def test_register_password_without_letters_rejected(self):
         """Проверяет отклонение пароля без букв."""
         with pytest.raises(ValueError, match="Пароль должен содержать как минимум одну букву и одну цифру"):
             UserRegister(
@@ -78,7 +82,8 @@ class TestPasswordValidation:
                 name="Test User",
             )
 
-    def test_register_password_too_short_rejected(self):
+    @pytest.mark.asyncio
+    async def test_register_password_too_short_rejected(self):
         """Проверяет отклонение пароля короче 6 символов."""
         with pytest.raises(ValueError):
             UserRegister(
@@ -87,7 +92,8 @@ class TestPasswordValidation:
                 name="Test User",
             )
 
-    def test_register_password_exceeding_72_bytes_rejected(self):
+    @pytest.mark.asyncio
+    async def test_register_password_exceeding_72_bytes_rejected(self):
         """Проверяет отклонение пароля длиннее 72 байт (ограничение bcrypt)."""
         long_password = "A1" + "a" * 75
         with pytest.raises(ValueError):
@@ -97,7 +103,8 @@ class TestPasswordValidation:
                 name="Test User",
             )
 
-    def test_register_valid_password_accepted(self):
+    @pytest.mark.asyncio
+    async def test_register_valid_password_accepted(self):
         """Проверяет успешное создание схемы с корректным паролем."""
         payload = UserRegister(
             email="user@example.com",
@@ -106,7 +113,8 @@ class TestPasswordValidation:
         )
         assert payload.password == "ValidPass123"
 
-    def test_login_password_exceeding_72_chars_rejected(self):
+    @pytest.mark.asyncio
+    async def test_login_password_exceeding_72_chars_rejected(self):
         """Проверяет ограничение максимальной длины пароля в схеме входа."""
         long_password = "A" * 75
         with pytest.raises(ValueError):
@@ -119,34 +127,36 @@ class TestPasswordValidation:
 class TestRateLimiting:
     """Тестирование ограничения частоты запросов (Rate Limiting)."""
 
-    def test_login_rate_limiting_exceeded(self, client: TestClient):
+    @pytest.mark.asyncio
+    async def test_login_rate_limiting_exceeded(self, client: AsyncClient):
         """Проверяет блокировку частых попыток входа с одного IP (лимит 5/мин)."""
         login_data = {"email": "attacker@example.com", "password": "WrongPassword123"}
 
         # Выполняем 5 разрешенных попыток
         for _ in range(5):
-            res = client.post("/api/v1/auth/login", json=login_data)
+            res = await client.post("/api/v1/auth/login", json=login_data)
             assert res.status_code in (401, 200)
 
         # 6-я попытка должна вернуть 429 Too Many Requests
-        response = client.post("/api/v1/auth/login", json=login_data)
+        response = await client.post("/api/v1/auth/login", json=login_data)
         assert response.status_code == 429
         data = response.json()
         assert data["status"] == "error"
         assert data["code"] == ErrorCode.RATE_LIMIT_EXCEEDED
         assert "лимит" in data["message"].lower() or "limit" in data["message"].lower()
 
-    def test_register_rate_limiting_exceeded(self, client: TestClient):
+    @pytest.mark.asyncio
+    async def test_register_rate_limiting_exceeded(self, client: AsyncClient):
         """Проверяет ограничение частоты запросов на регистрацию (лимит 5/мин)."""
         # Выполняем 5 запросов
         for i in range(5):
-            client.post(
+            await client.post(
                 "/api/v1/auth/register",
                 json={"email": f"ratelimit{i}@example.com", "password": "Password123", "name": f"User {i}"},
             )
 
         # 6-й запрос превышает лимит
-        response = client.post(
+        response = await client.post(
             "/api/v1/auth/register",
             json={"email": "ratelimit_over@example.com", "password": "Password123", "name": "Over Limit"},
         )
@@ -159,7 +169,8 @@ class TestRateLimiting:
 class TestDefaultSecretsValidation:
     """Тестирование проверки дефолтных секретов в продакшне."""
 
-    def test_production_mode_with_default_secret_raises_error(self):
+    @pytest.mark.asyncio
+    async def test_production_mode_with_default_secret_raises_error(self):
         """Проверяет выброс исключения в продакшне (debug=False) с дефолтным SECRET_KEY."""
         prod_config = Config(
             debug=False,
@@ -181,7 +192,8 @@ class TestDefaultSecretsValidation:
         with pytest.raises(ValueError, match="Недопустимо использовать значение по умолчанию"):
             validate_security_config(prod_config)
 
-    def test_production_mode_with_empty_secret_raises_error(self):
+    @pytest.mark.asyncio
+    async def test_production_mode_with_empty_secret_raises_error(self):
         """Проверяет выброс исключения в продакшне (debug=False) с пустым SECRET_KEY."""
         prod_config = Config(
             debug=False,
@@ -203,7 +215,8 @@ class TestDefaultSecretsValidation:
         with pytest.raises(ValueError, match="Недопустимо использовать значение по умолчанию"):
             validate_security_config(prod_config)
 
-    def test_production_mode_with_secure_secret_passes(self):
+    @pytest.mark.asyncio
+    async def test_production_mode_with_secure_secret_passes(self):
         """Проверяет успешное прохождение валидации при наличии безопасного SECRET_KEY."""
         prod_config = Config(
             debug=False,
@@ -225,7 +238,8 @@ class TestDefaultSecretsValidation:
         # Не должно вызывать исключений
         validate_security_config(prod_config)
 
-    def test_debug_mode_with_default_secret_allowed(self):
+    @pytest.mark.asyncio
+    async def test_debug_mode_with_default_secret_allowed(self):
         """Проверяет допустимость дефолтного ключа в режиме отладки (debug=True)."""
         dev_config = Config(
             debug=True,

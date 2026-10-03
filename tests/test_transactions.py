@@ -8,7 +8,6 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
 from app.database import get_db
@@ -16,9 +15,6 @@ from app.models.models import User
 from app.services.ai_service import AIService
 from app.services.auth_service import get_current_user
 from main import app
-
-# Тестовый HTTP-клиент FastAPI
-client = TestClient(app)
 
 
 def get_auth_headers(token: str = "test-token") -> dict:
@@ -36,7 +32,8 @@ def get_auth_headers(token: str = "test-token") -> dict:
 class TestTransactions:
     """Набор тестов для роутера транзакций (/api/v1/transactions)."""
 
-    def test_create_transaction_unauthorized(self):
+    @pytest.mark.asyncio
+    async def test_create_transaction_unauthorized(self, client: AsyncClient):
         """Попытка создания транзакции без токена возвращает 403 Forbidden."""
         payload = {
             "amount": 500.0,
@@ -44,17 +41,19 @@ class TestTransactions:
             "category": "food",
             "type": "expense",
         }
-        response = client.post("/api/v1/transactions/", json=payload)
+        response = await client.post("/api/v1/transactions/", json=payload)
         assert response.status_code == 403
 
-    def test_list_transactions_unauthorized(self):
+    @pytest.mark.asyncio
+    async def test_list_transactions_unauthorized(self, client: AsyncClient):
         """Запрос списка транзакций без токена возвращает 403 Forbidden."""
-        response = client.get("/api/v1/transactions/")
+        response = await client.get("/api/v1/transactions/")
         assert response.status_code == 403
 
-    def test_health_check(self, client: TestClient):
+    @pytest.mark.asyncio
+    async def test_health_check(self, client: AsyncClient):
         """Эндпоинт /health всегда доступен публично и возвращает 200 OK при доступной БД."""
-        response = client.get("/health")
+        response = await client.get("/health")
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
         assert response.json()["database"] == "healthy"
@@ -63,12 +62,14 @@ class TestTransactions:
 class TestBudgets:
     """Набор тестов для роутера бюджетов (/api/v1/budgets)."""
 
-    def test_list_budgets_unauthorized(self):
+    @pytest.mark.asyncio
+    async def test_list_budgets_unauthorized(self, client: AsyncClient):
         """Запрос списка бюджетов без токена возвращает 403 Forbidden."""
-        response = client.get("/api/v1/budgets/")
+        response = await client.get("/api/v1/budgets/")
         assert response.status_code == 403
 
-    def test_create_budget_unauthorized(self):
+    @pytest.mark.asyncio
+    async def test_create_budget_unauthorized(self, client: AsyncClient):
         """Попытка создания бюджета без токена возвращает 403 Forbidden."""
         payload = {
             "category": "food",
@@ -76,35 +77,34 @@ class TestBudgets:
             "month": 9,
             "year": 2026,
         }
-        response = client.post("/api/v1/budgets/", json=payload)
+        response = await client.post("/api/v1/budgets/", json=payload)
         assert response.status_code == 403
 
 
 class TestInsights:
     """Набор тестов для роутера AI-инсайтов (/api/v1/insights)."""
 
-    def test_insights_unauthorized(self):
+    @pytest.mark.asyncio
+    async def test_insights_unauthorized(self, client: AsyncClient):
         """Запрос AI-инсайтов без токена возвращает 403 Forbidden."""
-        response = client.get("/api/v1/insights/")
+        response = await client.get("/api/v1/insights/")
         assert response.status_code == 403
 
-    def test_insights_authorized_success(self):
+    @pytest.mark.asyncio
+    async def test_insights_authorized_success(self, client: AsyncClient):
         """Авторизованный запрос возвращает 200 OK и структуру ApiResponse[InsightResponse]."""
         test_user = MagicMock(spec=User)
         test_user.id = uuid.uuid4()
         mock_db = MagicMock()
-        mock_query = MagicMock()
-        mock_db.query.return_value = mock_query
-        mock_query.filter.return_value = mock_query
-        mock_query.order_by.return_value = mock_query
-        mock_query.limit.return_value = mock_query
-        mock_query.all.return_value = []
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
         app.dependency_overrides[get_current_user] = lambda: test_user
         app.dependency_overrides[get_db] = lambda: mock_db
 
         try:
-            response = client.get("/api/v1/insights/", headers=get_auth_headers())
+            response = await client.get("/api/v1/insights/", headers=get_auth_headers())
             assert response.status_code == 200
             data = response.json()
             assert data["status"] == "success"
@@ -114,7 +114,8 @@ class TestInsights:
         finally:
             app.dependency_overrides.clear()
 
-    def test_insights_http_caching(self):
+    @pytest.mark.asyncio
+    async def test_insights_http_caching(self, client: AsyncClient):
         """Два последовательных HTTP-запроса проверяют работу кэширования через API."""
         test_user = MagicMock(spec=User)
         test_user.id = uuid.uuid4()
@@ -138,22 +139,19 @@ class TestInsights:
                 tx.amount = 500.0
                 tx.description = "Обед"
 
-                mock_query = MagicMock()
-                mock_db.query.return_value = mock_query
-                mock_query.filter.return_value = mock_query
-                mock_query.order_by.return_value = mock_query
-                mock_query.limit.return_value = mock_query
-                mock_query.all.return_value = [tx]
+                mock_result = MagicMock()
+                mock_result.scalars.return_value.all.return_value = [tx]
+                mock_db.execute = AsyncMock(return_value=mock_result)
 
                 try:
                     # Первый HTTP-запрос (вызывает Claude API)
-                    res1 = client.get("/api/v1/insights/", headers=get_auth_headers())
+                    res1 = await client.get("/api/v1/insights/", headers=get_auth_headers())
                     assert res1.status_code == 200
                     assert res1.json()["data"]["insights"] == ["Совет 1", "Совет 2"]
                     assert mock_claude.await_count == 1
 
                     # Второй HTTP-запрос (кэш-хит)
-                    res2 = client.get("/api/v1/insights/", headers=get_auth_headers())
+                    res2 = await client.get("/api/v1/insights/", headers=get_auth_headers())
                     assert res2.status_code == 200
                     assert res2.json()["data"]["insights"] == ["Совет 1", "Совет 2"]
                     # Claude API НЕ вызывался повторно!
@@ -185,12 +183,9 @@ class TestInsights:
                 tx.amount = 300.0
                 tx.description = "Кофе"
 
-                mock_query = MagicMock()
-                mock_db.query.return_value = mock_query
-                mock_query.filter.return_value = mock_query
-                mock_query.order_by.return_value = mock_query
-                mock_query.limit.return_value = mock_query
-                mock_query.all.return_value = [tx]
+                mock_result = MagicMock()
+                mock_result.scalars.return_value.all.return_value = [tx]
+                mock_db.execute = AsyncMock(return_value=mock_result)
 
                 try:
                     transport = ASGITransport(app=app)

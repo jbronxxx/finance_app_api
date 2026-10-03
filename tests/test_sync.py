@@ -4,7 +4,10 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy.orm import Session
+import pytest
+from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import Budget, Category, Transaction, TransactionType, User
 
@@ -12,15 +15,18 @@ from app.models.models import Budget, Category, Transaction, TransactionType, Us
 class TestSyncEndpointIntegration:
     """Тесты пакетной офлайн-синхронизации данных."""
 
-    def test_sync_unauthorized(self, client):
+    @pytest.mark.asyncio
+    async def test_sync_unauthorized(self, client: AsyncClient):
         """Запрос синхронизации без авторизации возвращает 403 Forbidden."""
-        response = client.post("/api/v1/sync/", json={"transactions": [], "budgets": []})
+        response = await client.post("/api/v1/sync/", json={"transactions": [], "budgets": []})
         assert response.status_code == 403
 
-    def test_sync_create_transactions_and_budgets(
-        self, client, auth_headers: dict[str, str], db_session: Session, test_user: User
+    @pytest.mark.asyncio
+    async def test_sync_create_transactions_and_budgets(
+        self, client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession, test_user: User
     ):
         """Пакетная синхронизация создает новые транзакции и бюджеты."""
+        user_id = test_user.id
         tx1_id = str(uuid.uuid4())
         tx2_id = str(uuid.uuid4())
 
@@ -56,7 +62,7 @@ class TestSyncEndpointIntegration:
             "deleted_budgets": [],
         }
 
-        response = client.post("/api/v1/sync/", json=payload, headers=auth_headers)
+        response = await client.post("/api/v1/sync/", json=payload, headers=auth_headers)
         assert response.status_code == 200
         data = response.json()["data"]
 
@@ -75,12 +81,15 @@ class TestSyncEndpointIntegration:
         assert Decimal(str(synced_budgets[0]["remaining"])) == Decimal("14250.0")
 
         # Проверяем наличие записей в базе данных
-        db_tx = db_session.query(Transaction).filter(Transaction.id == uuid.UUID(tx1_id)).first()
+        db_tx = (
+            await db_session.execute(select(Transaction).filter(Transaction.id == uuid.UUID(tx1_id)))
+        ).scalar_one_or_none()
         assert db_tx is not None
-        assert db_tx.user_id == test_user.id
+        assert db_tx.user_id == user_id
 
-    def test_sync_upsert_existing_transaction(
-        self, client, auth_headers: dict[str, str], db_session: Session, test_user: User
+    @pytest.mark.asyncio
+    async def test_sync_upsert_existing_transaction(
+        self, client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession, test_user: User
     ):
         """Синхронизация обновляет существующую транзакцию при совпадении ID."""
         tx_id = uuid.uuid4()
@@ -94,7 +103,7 @@ class TestSyncEndpointIntegration:
             date=datetime(2026, 10, 1, 10, 0, 0, tzinfo=timezone.utc),
         )
         db_session.add(existing_tx)
-        db_session.commit()
+        await db_session.commit()
 
         payload = {
             "transactions": [
@@ -112,41 +121,46 @@ class TestSyncEndpointIntegration:
             "deleted_budgets": [],
         }
 
-        response = client.post("/api/v1/sync/", json=payload, headers=auth_headers)
+        response = await client.post("/api/v1/sync/", json=payload, headers=auth_headers)
         assert response.status_code == 200
 
         # Проверяем в базе данных
         db_session.expire_all()
-        updated_tx = db_session.query(Transaction).filter(Transaction.id == tx_id).first()
+        updated_tx = (await db_session.execute(select(Transaction).filter(Transaction.id == tx_id))).scalar_one_or_none()
         assert updated_tx.amount == 650.0
         assert updated_tx.description == "Обновленное описание"
 
-    def test_sync_delete_budgets(self, client, auth_headers: dict[str, str], db_session: Session, test_user: User):
+    @pytest.mark.asyncio
+    async def test_sync_delete_budgets(
+        self, client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession, test_user: User
+    ):
         """Синхронизация удаляет бюджеты по deleted_budget_ids, deleted_budgets и check_deleted."""
+        user_id = test_user.id
         # Создаем 3 бюджета
         b1 = Budget(
-            user_id=test_user.id,
+            user_id=user_id,
             category=Category.food,
             limit_amount=10000.0,
             month=10,
             year=2026,
         )
         b2 = Budget(
-            user_id=test_user.id,
+            user_id=user_id,
             category=Category.transport,
             limit_amount=5000.0,
             month=10,
             year=2026,
         )
         b3 = Budget(
-            user_id=test_user.id,
+            user_id=user_id,
             category=Category.entertainment,
             limit_amount=7000.0,
             month=10,
             year=2026,
         )
         db_session.add_all([b1, b2, b3])
-        db_session.commit()
+        await db_session.commit()
+        await db_session.refresh(b1)
 
         payload = {
             "transactions": [],
@@ -172,16 +186,17 @@ class TestSyncEndpointIntegration:
             ],
         }
 
-        response = client.post("/api/v1/sync/", json=payload, headers=auth_headers)
+        response = await client.post("/api/v1/sync/", json=payload, headers=auth_headers)
         assert response.status_code == 200
 
         # Проверяем, что все три бюджета удалены
         db_session.expire_all()
-        remaining_budgets = db_session.query(Budget).filter(Budget.user_id == test_user.id).all()
+        remaining_budgets = (await db_session.execute(select(Budget).filter(Budget.user_id == user_id))).scalars().all()
         assert len(remaining_budgets) == 0
 
-    def test_sync_batch_multiple_items_and_enrichment(
-        self, client, auth_headers: dict[str, str], db_session: Session, test_user: User
+    @pytest.mark.asyncio
+    async def test_sync_batch_multiple_items_and_enrichment(
+        self, client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession, test_user: User
     ):
         """Пакетная синхронизация 10+ транзакций и нескольких бюджетов корректно рассчитывает агрегаты."""
         tx_items = []
@@ -219,7 +234,7 @@ class TestSyncEndpointIntegration:
             "deleted_budgets": [],
         }
 
-        response = client.post("/api/v1/sync/", json=payload, headers=auth_headers)
+        response = await client.post("/api/v1/sync/", json=payload, headers=auth_headers)
         assert response.status_code == 200
         data = response.json()["data"]
 

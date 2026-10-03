@@ -1,11 +1,13 @@
 """Сервис управления финансовыми транзакциями (доходы и расходы)."""
 
+import base64
 import hashlib
+import json
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import ErrorCode, NotFoundException
 from app.models.models import Transaction
@@ -18,24 +20,16 @@ logger = get_logger(__name__)
 class TransactionService:
     """Класс бизнес-логики для создания, получения и удаления финансовых операций."""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: AsyncSession):
         """Инициализация сервиса с сессией базы данных.
 
         Аргументы:
-            db (Session): Сессия SQLAlchemy.
+            db (AsyncSession): Асинхронная сессия SQLAlchemy.
         """
         self.db = db
 
-    def create(self, user_id: uuid.UUID, payload: TransactionCreate) -> Transaction:
-        """Создать новую транзакцию (доход или расход) для пользователя.
-
-        Аргументы:
-            user_id (uuid.UUID): Уникальный ID пользователя-владельца.
-            payload (TransactionCreate): Данные для создания транзакции.
-
-        Возвращает:
-            Transaction: Созданная и сохраненная в БД запись транзакции.
-        """
+    async def create(self, user_id: uuid.UUID, payload: TransactionCreate) -> Transaction:
+        """Создать новую транзакцию (доход или расход) для пользователя."""
         tx = Transaction(
             user_id=user_id,
             amount=payload.amount,
@@ -45,37 +39,23 @@ class TransactionService:
             date=payload.date or datetime.now(timezone.utc),
         )
         self.db.add(tx)
-        self.db.flush()
-        self.db.refresh(tx)
+        await self.db.flush()
+        await self.db.refresh(tx)
         logger.info(f"Создана новая транзакция: {tx}")
         return tx
 
-    def get_all(
+    async def get_all(
         self,
         user_id: uuid.UUID,
         since: datetime | None = None,
         limit: int = 50,
         cursor: str | None = None,
     ) -> tuple[list[Transaction], bool, str | None]:
-        """Получение транзакций с поддержкой курсорной пагинации (keyset pagination) и фильтрации.
+        """Получение транзакций с поддержкой курсорной пагинации (keyset pagination) и фильтрации."""
 
-        Аргументы:
-            user_id (uuid.UUID): Уникальный ID пользователя.
-            since (datetime | None): Фильтр по минимальной дате создания (created_at).
-            limit (int): Максимальное количество возвращаемых записей.
-            cursor (str | None): Курсор для получения следующей страницы.
-
-        Возвращает:
-            tuple[list[Transaction], bool, str | None]: Кортеж из списка транзакций, флага наличия след. страницы и курсора.
-        """
-        import base64
-        import json
-
-        from sqlalchemy import and_, or_
-
-        query = self.db.query(Transaction).filter(Transaction.user_id == user_id)
+        query = select(Transaction).where(Transaction.user_id == user_id)
         if since:
-            query = query.filter(Transaction.created_at >= since)
+            query = query.where(Transaction.created_at >= since)
 
         if cursor:
             try:
@@ -85,7 +65,7 @@ class TransactionService:
                     cursor_date = cursor_date.replace(tzinfo=timezone.utc)
                 cursor_id = uuid.UUID(cursor_data["i"])
 
-                query = query.filter(
+                query = query.where(
                     or_(Transaction.date < cursor_date, and_(Transaction.date == cursor_date, Transaction.id < cursor_id))
                 )
             except Exception as e:
@@ -96,7 +76,8 @@ class TransactionService:
         # Запрашиваем на 1 больше, чтобы определить, есть ли следующая страница
         query = query.limit(limit + 1)
 
-        items = query.all()
+        result = await self.db.execute(query)
+        items = list(result.scalars().all())
         has_more = len(items) > limit
         if has_more:
             items = items[:limit]
@@ -109,17 +90,12 @@ class TransactionService:
 
         return items, has_more, next_cursor
 
-    def delete(self, user_id: uuid.UUID, transaction_id: uuid.UUID) -> None:
-        """Удалить транзакцию по ее идентификатору.
+    async def delete(self, user_id: uuid.UUID, transaction_id: uuid.UUID) -> None:
+        """Удалить транзакцию по ее идентификатору."""
+        query = select(Transaction).where(Transaction.id == transaction_id, Transaction.user_id == user_id)
+        result = await self.db.execute(query)
+        tx = result.scalar_one_or_none()
 
-        Аргументы:
-            user_id (uuid.UUID): Уникальный ID пользователя (для проверки прав доступа).
-            transaction_id (uuid.UUID): ID удаляемой транзакции.
-
-        Исключения:
-            NotFoundException (404): Если транзакция с указанным ID не найдена у данного пользователя.
-        """
-        tx = self.db.query(Transaction).filter(Transaction.id == transaction_id, Transaction.user_id == user_id).first()
         if not tx:
             logger.warning(f"Попытка удаления несуществующей транзакции {transaction_id} для пользователя {user_id}")
             raise NotFoundException(
@@ -127,11 +103,11 @@ class TransactionService:
                 message="Транзакция не найдена",
                 details={"transaction_id": str(transaction_id)},
             )
-        self.db.delete(tx)
-        self.db.flush()
+        await self.db.delete(tx)
+        await self.db.flush()
         logger.info(f"Транзакция удалена: {tx.id}")
 
-    def get_etag(
+    async def get_etag(
         self,
         user_id: uuid.UUID,
         since: datetime | None = None,
@@ -139,11 +115,13 @@ class TransactionService:
         cursor: str | None = None,
     ) -> str:
         """Быстрый расчет ETag без выгрузки всех объектов с учетом пагинации (без count)."""
-        query = self.db.query(func.max(Transaction.created_at)).filter(Transaction.user_id == user_id)
+        query = select(func.max(Transaction.created_at)).where(Transaction.user_id == user_id)
 
         if since:
-            query = query.filter(Transaction.created_at >= since)
+            query = query.where(Transaction.created_at >= since)
 
-        max_created = query.scalar()
+        result = await self.db.execute(query)
+        max_created = result.scalar_one_or_none()
+
         raw_str = f"{user_id}:{max_created.isoformat() if max_created else ''}:{limit}:{cursor or ''}"
         return hashlib.md5(raw_str.encode()).hexdigest()

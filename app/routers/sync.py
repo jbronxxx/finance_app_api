@@ -4,8 +4,9 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, status
+from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.exceptions import AppException, BadRequestException, ErrorCode
@@ -34,13 +35,14 @@ router = APIRouter(
     status_code=status.HTTP_200_OK,
     summary="Синхронизировать данные",
 )
-def sync_data(
+async def sync_data(
     payload: SyncPayload,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    user_id = current_user.id
     logger.info(
-        f"Начало синхронизации для пользователя {current_user.id}, "
+        f"Начало синхронизации для пользователя {user_id}, "
         f"Транзакций: {len(payload.transactions)}, "
         f"Бюджетов: {len(payload.budgets)}, "
         f"Удаляемых ID бюджетов: {len(payload.deleted_budget_ids)}, "
@@ -55,14 +57,12 @@ def sync_data(
         incoming_tx_ids = [item.id for item in payload.transactions if item.id is not None]
         existing_txs_map = {}
         if incoming_tx_ids:
-            existing_txs = (
-                db.query(Transaction)
-                .filter(
-                    Transaction.user_id == current_user.id,
-                    Transaction.id.in_(incoming_tx_ids),
-                )
-                .all()
+            query = select(Transaction).where(
+                Transaction.user_id == user_id,
+                Transaction.id.in_(incoming_tx_ids),
             )
+            result = await db.execute(query)
+            existing_txs = list(result.scalars().all())
             existing_txs_map = {t.id: t for t in existing_txs}
 
         for item in payload.transactions:
@@ -77,7 +77,7 @@ def sync_data(
             else:
                 db_transaction = Transaction(
                     id=item.id or uuid.uuid4(),
-                    user_id=current_user.id,
+                    user_id=user_id,
                     amount=item.amount,
                     description=item.description,
                     category=item.category,
@@ -93,22 +93,26 @@ def sync_data(
         # 2. Удаляем бюджеты по ID из payload.deleted_budget_ids
         if payload.deleted_budget_ids:
             logger.debug(f"Удаление бюджетов по ID в процессе синхронизации: {payload.deleted_budget_ids}")
-            db.query(Budget).filter(
-                Budget.user_id == current_user.id,
-                Budget.id.in_(payload.deleted_budget_ids),
-            ).delete(synchronize_session=False)
+            await db.execute(
+                delete(Budget).where(
+                    Budget.user_id == user_id,
+                    Budget.id.in_(payload.deleted_budget_ids),
+                )
+            )
 
         # 3. Удаляем бюджеты из payload.deleted_budgets
         for item in payload.deleted_budgets:
             logger.debug(
                 f"Удаление бюджета по категории/периоду из deleted_budgets: {item.category} ({item.month}/{item.year})"
             )
-            db.query(Budget).filter(
-                Budget.user_id == current_user.id,
-                Budget.category == item.category,
-                Budget.month == item.month,
-                Budget.year == item.year,
-            ).delete(synchronize_session=False)
+            await db.execute(
+                delete(Budget).where(
+                    Budget.user_id == user_id,
+                    Budget.category == item.category,
+                    Budget.month == item.month,
+                    Budget.year == item.year,
+                )
+            )
 
         # 4. Сохраняем, обновляем или удаляем бюджеты из payload.budgets
         to_delete_budgets = [item for item in payload.budgets if item.check_deleted]
@@ -116,15 +120,19 @@ def sync_data(
 
         for item in to_delete_budgets:
             logger.debug(f"Удаление бюджета при синхронизации: {item.category} ({item.month}/{item.year})")
-            db.query(Budget).filter(
-                Budget.user_id == current_user.id,
-                Budget.category == item.category,
-                Budget.month == item.month,
-                Budget.year == item.year,
-            ).delete(synchronize_session=False)
+            await db.execute(
+                delete(Budget).where(
+                    Budget.user_id == user_id,
+                    Budget.category == item.category,
+                    Budget.month == item.month,
+                    Budget.year == item.year,
+                )
+            )
 
         if to_upsert_budgets:
-            existing_user_budgets = db.query(Budget).filter(Budget.user_id == current_user.id).all()
+            query = select(Budget).where(Budget.user_id == user_id)
+            result = await db.execute(query)
+            existing_user_budgets = list(result.scalars().all())
             existing_budget_map = {(b.category, b.month, b.year): b for b in existing_user_budgets}
 
             for item in to_upsert_budgets:
@@ -137,7 +145,7 @@ def sync_data(
                 else:
                     logger.debug(f"Создание нового бюджета для {item.category} ({item.month}/{item.year})")
                     db_budget = Budget(
-                        user_id=current_user.id,
+                        user_id=user_id,
                         category=item.category,
                         limit_amount=item.limit_amount,
                         month=item.month,
@@ -147,19 +155,19 @@ def sync_data(
                     existing_budget_map[key] = db_budget
                     synced_budgets.append(db_budget)
 
-        db.commit()
+        await db.commit()
         # Обновляем объекты из БД после коммита
         for b in synced_budgets:
-            db.refresh(b)
+            await db.refresh(b)
         for t in synced_transactions:
-            db.refresh(t)
+            await db.refresh(t)
 
-        enriched_budgets = budget_service.enrich_multiple(synced_budgets, current_user.id)
+        enriched_budgets = await budget_service.enrich_multiple(synced_budgets, user_id)
 
     except SQLAlchemyError as e:
-        db.rollback()
+        await db.rollback()
         logger.error(
-            f"Ошибка базы данных при синхронизации пользователя {current_user.id}: {str(e)}",
+            f"Ошибка базы данных при синхронизации пользователя {user_id}: {str(e)}",
             exc_info=True,
         )
         raise AppException(
@@ -169,9 +177,9 @@ def sync_data(
             details={"error": str(e)},
         )
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(
-            f"Непредвиденная ошибка при синхронизации пользователя {current_user.id}: {str(e)}",
+            f"Непредвиденная ошибка при синхронизации пользователя {user_id}: {str(e)}",
             exc_info=True,
         )
         raise BadRequestException(
@@ -179,7 +187,7 @@ def sync_data(
             message=f"Не удалось обработать запрос синхронизации: {str(e)}",
         )
 
-    logger.info(f"Синхронизация успешно завершена для пользователя {current_user.id}")
+    logger.info(f"Синхронизация успешно завершена для пользователя {user_id}")
     return {
         "status": "success",
         "data": {

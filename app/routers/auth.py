@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.security import HTTPBearer
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.limiter import limiter
@@ -39,17 +39,8 @@ router = APIRouter(
     summary="Регистрация нового пользователя",
 )
 @limiter.limit("5/minute")
-async def register(request: Request, payload: UserRegister, db: Session = Depends(get_db)) -> dict[str, str | User]:
-    """Зарегистрировать нового пользователя в системе.
-
-    Аргументы:
-        request (Request): Объект входящего HTTP запроса (для rate limiting).
-        payload (UserRegister): Данные для регистрации (email, пароль, имя).
-        db (Session): Сессия базы данных.
-
-    Возвращает:
-        ApiResponse[UserResponse]: Созданный профиль пользователя.
-    """
+async def register(request: Request, payload: UserRegister, db: AsyncSession = Depends(get_db)) -> dict[str, str | User]:
+    """Зарегистрировать нового пользователя в системе."""
     service = AuthService(db)
     user = await service.register(payload)
     return {"status": "success", "data": user}
@@ -61,17 +52,8 @@ async def register(request: Request, payload: UserRegister, db: Session = Depend
     summary="Вход в систему и получение токенов",
 )
 @limiter.limit("5/minute")
-async def login(request: Request, payload: UserLogin, db: Session = Depends(get_db)) -> dict[str, str | TokenResponse]:
-    """Аутентификация пользователя по email и паролю с возвратом JWT access и refresh токенов.
-
-    Аргументы:
-        request (Request): Объект входящего HTTP запроса (для rate limiting).
-        payload (UserLogin): Учетные данные пользователя (email, пароль).
-        db (Session): Сессия базы данных.
-
-    Возвращает:
-        ApiResponse[TokenResponse]: Пара токенов access_token и refresh_token.
-    """
+async def login(request: Request, payload: UserLogin, db: AsyncSession = Depends(get_db)) -> dict[str, str | TokenResponse]:
+    """Аутентификация пользователя по email и паролю с возвратом JWT access и refresh токенов."""
     service = AuthService(db)
     tokens = await service.login(payload)
     return {"status": "success", "data": tokens}
@@ -82,20 +64,10 @@ async def login(request: Request, payload: UserLogin, db: Session = Depends(get_
     response_model=ApiResponse[TokenResponse],
     summary="Обновление access_token с использованием refresh_token",
 )
-def refresh_tokens(payload: RefreshTokenRequest, db: Session = Depends(get_db)) -> dict[str, str | TokenResponse]:
-    """Обновить access_token и получить новую пару токенов по действующему refresh_token.
-
-    Используется клиентом (фронтендом) при получении 401 HTTP-статуса для бесшовного обновления сессии.
-
-    Аргументы:
-        payload (RefreshTokenRequest): Передаваемый refresh_token.
-        db (Session): Сессия базы данных.
-
-    Возвращает:
-        ApiResponse[TokenResponse]: Обновленные access_token и refresh_token.
-    """
+async def refresh_tokens(payload: RefreshTokenRequest, db: AsyncSession = Depends(get_db)) -> dict[str, str | TokenResponse]:
+    """Обновить access_token и получить новую пару токенов по действующему refresh_token."""
     service = AuthService(db)
-    tokens = service.refresh_tokens(payload.refresh_token)
+    tokens = await service.refresh_tokens(payload.refresh_token)
     return {"status": "success", "data": tokens}
 
 
@@ -104,18 +76,12 @@ def refresh_tokens(payload: RefreshTokenRequest, db: Session = Depends(get_db)) 
     response_model=BaseResponse,
     summary="Выход из системы и деактивация токена",
 )
-def logout(
-    db: Session = Depends(get_db),
+async def logout(
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     credentials: HTTPBearer = Depends(AuthService.bearer_scheme),
 ) -> dict[str, str]:
-    """Выйти из системы, деактивируя токен в базе данных.
-
-    Аргументы:
-        db (Session): Сессия базы данных.
-        current_user (User): Текущий авторизованный пользователь.
-        credentials (HTTPBearer): Токен из заголовка Authorization.
-    """
+    """Выйти из системы, деактивируя токен в памяти."""
     service = AuthService(db)
     service.logout(current_user.id, credentials.credentials)
     return {"status": "success", "message": "Successfully logged out"}
@@ -126,7 +92,7 @@ def logout(
     response_model=ApiResponse[UserResponse],
     summary="Получение информации о текущем пользователе",
 )
-def auth_me(
+async def auth_me(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, str | User]:
     """Получить информацию о текущем пользователе."""

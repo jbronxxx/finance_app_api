@@ -5,6 +5,7 @@
 """
 
 import argparse
+import asyncio
 import sys
 from pathlib import Path
 
@@ -31,7 +32,7 @@ def main() -> None:
     args = parser.parse_args()
 
     logger.info(f"Запуск скрипта очистки токенов с параметром retention_days={args.days}")
-    count = run_token_cleanup(retention_days=args.days)
+    count = asyncio.run(run_token_cleanup(retention_days=args.days))
     print(f"Очистка токенов завершена. Удалено записей: {count}")
 
 

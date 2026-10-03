@@ -68,3 +68,6 @@ htmlcov/
 # Logs and databases
 *.log
 postgres_data/
+
+# Scripts
+refactor_tests.py

@@ -4,8 +4,8 @@ import hashlib
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import ErrorCode, NotFoundException
 from app.models.models import Budget, Category, Transaction, TransactionType
@@ -18,41 +18,27 @@ logger = get_logger(__name__)
 class BudgetService:
     """Класс бизнес-логики для установки бюджетов и подсчета остатков лимитов."""
 
-    def __init__(self, db: Session):
-        """Инициализация сервиса с сессией базы данных.
-
-        Аргументы:
-            db (Session): Сессия SQLAlchemy.
-        """
+    def __init__(self, db: AsyncSession):
+        """Инициализация сервиса с сессией базы данных."""
         self.db = db
 
-    def create(self, user_id: uuid.UUID, payload: BudgetCreate) -> BudgetResponse:
-        """Создать новый бюджет или обновить существующий лимит расходов по категории на указанный период.
-
-        Аргументы:
-            user_id (uuid.UUID): Уникальный ID пользователя.
-            payload (BudgetCreate): Параметры создаваемого бюджета (категория, лимит, месяц, год).
-
-        Возвращает:
-            BudgetResponse: Обогащенная модель бюджета с расчетом потраченной суммы и остатка.
-        """
-        existing_budget = (
-            self.db.query(Budget)
-            .filter(
-                Budget.user_id == user_id,
-                Budget.category == payload.category,
-                Budget.month == payload.month,
-                Budget.year == payload.year,
-            )
-            .first()
+    async def create(self, user_id: uuid.UUID, payload: BudgetCreate) -> BudgetResponse:
+        """Создать новый бюджет или обновить существующий лимит расходов по категории на указанный период."""
+        query = select(Budget).where(
+            Budget.user_id == user_id,
+            Budget.category == payload.category,
+            Budget.month == payload.month,
+            Budget.year == payload.year,
         )
+        result = await self.db.execute(query)
+        existing_budget = result.scalar_one_or_none()
 
         if existing_budget:
             logger.info(f"Обновление существующего бюджета {existing_budget.id} для пользователя {user_id}")
             existing_budget.limit_amount = payload.limit_amount
-            self.db.flush()
-            self.db.refresh(existing_budget)
-            return self._enrich(existing_budget, user_id)
+            await self.db.flush()
+            await self.db.refresh(existing_budget)
+            return await self._enrich(existing_budget, user_id)
 
         budget = Budget(
             user_id=user_id,
@@ -62,22 +48,16 @@ class BudgetService:
             year=payload.year,
         )
         self.db.add(budget)
-        self.db.flush()
-        self.db.refresh(budget)
+        await self.db.flush()
+        await self.db.refresh(budget)
         logger.info(f"Создан новый бюджет: {budget}")
-        return self._enrich(budget, user_id)
+        return await self._enrich(budget, user_id)
 
-    def get_by_id(self, user_id: uuid.UUID, budget_id: uuid.UUID) -> BudgetResponse:
-        """Получить бюджет по его идентификатору.
-
-        Аргументы:
-            user_id (uuid.UUID): Уникальный ID пользователя.
-            budget_id (uuid.UUID): Уникальный ID бюджета.
-
-        Возвращает:
-            BudgetResponse: Модель бюджета с расчетом потраченной суммы и остатка.
-        """
-        budget = self.db.query(Budget).filter(Budget.id == budget_id, Budget.user_id == user_id).first()
+    async def get_by_id(self, user_id: uuid.UUID, budget_id: uuid.UUID) -> BudgetResponse:
+        """Получить бюджет по его идентификатору."""
+        query = select(Budget).where(Budget.id == budget_id, Budget.user_id == user_id)
+        result = await self.db.execute(query)
+        budget = result.scalar_one_or_none()
         if not budget:
             logger.warning(f"Бюджет {budget_id} не найден для пользователя {user_id}")
             raise NotFoundException(
@@ -85,39 +65,27 @@ class BudgetService:
                 message="Бюджет не найден",
                 details={"budget_id": str(budget_id)},
             )
-        return self._enrich(budget, user_id)
+        return await self._enrich(budget, user_id)
 
-    def get_all(self, user_id: uuid.UUID, month: int | None, year: int | None) -> list[BudgetResponse]:
-        """Получить список всех бюджетов пользователя с фильтрацией по месяцу и году.
-
-        Аргументы:
-            user_id (uuid.UUID): Уникальный ID пользователя.
-            month (int | None): Номер месяца для фильтрации (опционально).
-            year (int | None): Год для фильтрации (опционально).
-
-        Возвращает:
-            list[BudgetResponse]: Список бюджетов с актуальными данными по расходам.
-        """
-        query = self.db.query(Budget).filter(Budget.user_id == user_id)
+    async def get_all(self, user_id: uuid.UUID, month: int | None, year: int | None) -> list[BudgetResponse]:
+        """Получить список всех бюджетов пользователя с фильтрацией по месяцу и году."""
+        query = select(Budget).where(Budget.user_id == user_id)
         if month:
-            query = query.filter(Budget.month == month)
+            query = query.where(Budget.month == month)
         if year:
-            query = query.filter(Budget.year == year)
-        budgets = query.all()
+            query = query.where(Budget.year == year)
+
+        result = await self.db.execute(query)
+        budgets = list(result.scalars().all())
         logger.info(f"Получено {len(budgets)} бюджетов для пользователя {user_id} с фильтром месяц={month}, год={year}")
-        return self.enrich_multiple(budgets, user_id)
+        return await self.enrich_multiple(budgets, user_id)
 
-    def delete(self, user_id: uuid.UUID, budget_id: uuid.UUID) -> None:
-        """Удалить бюджет по его идентификатору.
+    async def delete(self, user_id: uuid.UUID, budget_id: uuid.UUID) -> None:
+        """Удалить бюджет по его идентификатору."""
+        query = select(Budget).where(Budget.id == budget_id, Budget.user_id == user_id)
+        result = await self.db.execute(query)
+        budget = result.scalar_one_or_none()
 
-        Аргументы:
-            user_id (uuid.UUID): Уникальный ID пользователя (для проверки прав доступа).
-            budget_id (uuid.UUID): ID удаляемого бюджета.
-
-        Исключения:
-            NotFoundException (404): Если бюджет с указанным ID не найден у данного пользователя.
-        """
-        budget = self.db.query(Budget).filter(Budget.id == budget_id, Budget.user_id == user_id).first()
         if not budget:
             logger.warning(f"Попытка удаления несуществующего бюджета {budget_id} для пользователя {user_id}")
             raise NotFoundException(
@@ -125,74 +93,55 @@ class BudgetService:
                 message="Бюджет не найден",
                 details={"budget_id": str(budget_id)},
             )
-        self.db.delete(budget)
-        self.db.flush()
+        await self.db.delete(budget)
+        await self.db.flush()
         logger.info(f"Бюджет удален: {budget_id}")
 
-    def delete_by_category_period(self, user_id: uuid.UUID, category: Category, month: int, year: int) -> bool:
-        """Удалить бюджет по категории, месяцу и году.
-
-        Аргументы:
-            user_id (uuid.UUID): Уникальный ID пользователя.
-            category (Category): Категория бюджета.
-            month (int): Месяц.
-            year (int): Год.
-
-        Возвращает:
-            bool: True, если бюджет найден и удален, иначе False.
-        """
-        budget = (
-            self.db.query(Budget)
-            .filter(
-                Budget.user_id == user_id,
-                Budget.category == category,
-                Budget.month == month,
-                Budget.year == year,
-            )
-            .first()
+    async def delete_by_category_period(self, user_id: uuid.UUID, category: Category, month: int, year: int) -> bool:
+        """Удалить бюджет по категории, месяцу и году."""
+        query = select(Budget).where(
+            Budget.user_id == user_id,
+            Budget.category == category,
+            Budget.month == month,
+            Budget.year == year,
         )
+        result = await self.db.execute(query)
+        budget = result.scalar_one_or_none()
+
         if not budget:
             return False
-        self.db.delete(budget)
-        self.db.flush()
+        await self.db.delete(budget)
+        await self.db.flush()
         logger.info(f"Бюджет удален по категории и периоду: {category} ({month}/{year})")
         return True
 
-    def get_etag(self, user_id: uuid.UUID, month: int | None = None, year: int | None = None) -> str:
+    async def get_etag(self, user_id: uuid.UUID, month: int | None = None, year: int | None = None) -> str:
         """Быстрый расчет ETag без выгрузки всех объектов бюджетов."""
-        query = self.db.query(func.count(Budget.id), func.max(Budget.created_at)).filter(Budget.user_id == user_id)
+        query = select(func.count(Budget.id), func.max(Budget.created_at)).where(Budget.user_id == user_id)
 
         if month:
-            query = query.filter(Budget.month == month)
+            query = query.where(Budget.month == month)
         if year:
-            query = query.filter(Budget.year == year)
+            query = query.where(Budget.year == year)
 
-        count, max_created = query.first()
+        result = await self.db.execute(query)
+        count, max_created = result.first()
         raw_str = f"{user_id}:{count}:{max_created.isoformat() if max_created else ''}"
         return hashlib.md5(raw_str.encode()).hexdigest()
 
-    def enrich_multiple(self, budgets: list[Budget], user_id: uuid.UUID) -> list[BudgetResponse]:
-        """Обогатить список бюджетов агрегированными данными о фактических расходах за один SQL-запрос.
-
-        Аргументы:
-            budgets (list[Budget]): Список сущностей бюджетов.
-            user_id (uuid.UUID): Уникальный ID пользователя.
-
-        Возвращает:
-            list[BudgetResponse]: Список обогащенных ответов со spent и remaining.
-        """
+    async def enrich_multiple(self, budgets: list[Budget], user_id: uuid.UUID) -> list[BudgetResponse]:
+        """Обогатить список бюджетов агрегированными данными о фактических расходах за один SQL-запрос."""
         if not budgets:
             return []
 
-        # Агрегируем расходы одним SQL-запросом с группировкой по категории, месяцу и году
-        expenses_records = (
-            self.db.query(
+        query = (
+            select(
                 Transaction.category,
                 func.extract("month", Transaction.date).label("month"),
                 func.extract("year", Transaction.date).label("year"),
                 func.sum(Transaction.amount).label("spent"),
             )
-            .filter(
+            .where(
                 Transaction.user_id == user_id,
                 Transaction.type == TransactionType.expense,
             )
@@ -201,8 +150,10 @@ class BudgetService:
                 func.extract("month", Transaction.date),
                 func.extract("year", Transaction.date),
             )
-            .all()
         )
+
+        result = await self.db.execute(query)
+        expenses_records = result.all()
 
         spent_map = {(rec.category, int(rec.month), int(rec.year)): Decimal(str(rec.spent)) for rec in expenses_records}
 
@@ -224,14 +175,7 @@ class BudgetService:
             )
         return enriched
 
-    def _enrich(self, budget: Budget, user_id: uuid.UUID) -> BudgetResponse:
-        """Обогатить объект бюджета агрегированными данными о фактических расходах.
-
-        Аргументы:
-            budget (Budget): Сущность бюджета из БД.
-            user_id (uuid.UUID): Уникальный ID пользователя.
-
-        Возвращает:
-            BudgetResponse: Ответ со значениями spent (потрачено) и remaining (остаток).
-        """
-        return self.enrich_multiple([budget], user_id)[0]
+    async def _enrich(self, budget: Budget, user_id: uuid.UUID) -> BudgetResponse:
+        """Обогатить объект бюджета агрегированными данными о фактических расходах."""
+        enriched_list = await self.enrich_multiple([budget], user_id)
+        return enriched_list[0]

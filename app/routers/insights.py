@@ -1,7 +1,7 @@
 """Эндпоинты формирования персональной AI-аналитики и рекомендаций."""
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.limiter import limiter
@@ -28,22 +28,10 @@ router = APIRouter(
 @limiter.limit("10/minute")
 async def get_insights(
     request: Request,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Сформировать персонализированные финансовые советы на основе истории транзакций пользователя.
-
-    Анализирует последние операции пользователя и передает сводку в модель Anthropic Claude.
-    Если API ключ не задан, возвращает демонстрационные заглушки.
-
-    Аргументы:
-        request (Request): Объект входящего HTTP запроса (для rate limiting).
-        db (Session): Сессия базы данных (инъекция через Depends).
-        current_user (User): Текущий аутентифицированный пользователь.
-
-    Возвращает:
-        ApiResponse[InsightResponse]: Список персональных рекомендаций с отметкой времени.
-    """
+    """Сформировать персонализированные финансовые советы на основе истории транзакций пользователя."""
     service = AIService(db)
     insights = await service.get_insights(current_user.id)
     return {"status": "success", "data": insights}

@@ -7,9 +7,9 @@ import uuid
 from datetime import datetime, timezone
 
 import anthropic
-from fastapi.concurrency import run_in_threadpool
 from redis import asyncio as aioredis
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import Transaction
 from app.schemas.schemas import InsightResponse
@@ -24,23 +24,14 @@ redis_client = aioredis.from_url(config.redis_url, decode_responses=True)
 class AIService:
     """Сервис взаимодействия с LLM (Anthropic Claude) для анализа транзакций пользователя."""
 
-    def __init__(self, db: Session, client: anthropic.AsyncAnthropic | None = None):
-        """Инициализация сервиса с сессией базы данных и асинхронным клиентом Anthropic.
-
-        Аргументы:
-            db (Session): Сессия SQLAlchemy.
-            client (anthropic.AsyncAnthropic, optional): Асинхронный клиент Anthropic Claude.
-        """
+    def __init__(self, db: AsyncSession, client: anthropic.AsyncAnthropic | None = None):
+        """Инициализация сервиса с сессией базы данных и асинхронным клиентом Anthropic."""
         self.db = db
         self.client = client or anthropic.AsyncAnthropic(api_key=config.anthropic_api_key or None)
 
     @classmethod
     async def invalidate_cache(cls, user_id: uuid.UUID) -> None:
-        """Инвалидировать кэш инсайтов для конкретного пользователя.
-
-        Аргументы:
-            user_id (uuid.UUID): Уникальный ID пользователя.
-        """
+        """Инвалидировать кэш инсайтов для конкретного пользователя."""
         await redis_client.delete(f"insights_cache:{user_id}")
 
     @classmethod
@@ -50,17 +41,7 @@ class AIService:
 
     @staticmethod
     def _extract_json(text: str) -> dict:
-        """Извлечь и распарсить JSON-объект из ответа модели, очищая markdown и лишний текст.
-
-        Аргументы:
-            text (str): Исходный текстовый ответ модели.
-
-        Возвращает:
-            dict: Распарсенный словарь.
-
-        Исключения:
-            json.JSONDecodeError: Если валидный JSON не обнаружен.
-        """
+        """Извлечь и распарсить JSON-объект из ответа модели, очищая markdown и лишний текст."""
         cleaned = text.strip()
 
         # Удаляем markdown-блоки вида ```json ... ``` или ``` ... ```
@@ -80,18 +61,7 @@ class AIService:
         return json.loads(cleaned)
 
     async def get_insights(self, user_id: uuid.UUID) -> InsightResponse:
-        """Сформировать персональные рекомендации по расходам пользователя.
-
-        Если API ключ не указан или оставлен плейсхолдер — возвращаются информационные заглушки.
-        Если транзакций нет — возвращается совет добавить первые операции.
-        Если транзакции не менялись — возвращается закэшированный результат.
-
-        Аргументы:
-            user_id (uuid.UUID): Уникальный ID пользователя.
-
-        Возвращает:
-            InsightResponse: Объект со списком рекомендаций и датой их генерации.
-        """
+        """Сформировать персональные рекомендации по расходам пользователя."""
         # Если API ключ не задан или остался плейсхолдер — возвращаем заглушку
         is_placeholder = not config.anthropic_api_key or config.anthropic_api_key.startswith("sk-ant-your-key")
         if is_placeholder:
@@ -103,16 +73,9 @@ class AIService:
                 generated_at=datetime.now(timezone.utc),
             )
 
-        def _get_txs():
-            return (
-                self.db.query(Transaction)
-                .filter(Transaction.user_id == user_id)
-                .order_by(Transaction.date.desc())
-                .limit(50)
-                .all()
-            )
-
-        transactions = await run_in_threadpool(_get_txs)
+        query = select(Transaction).where(Transaction.user_id == user_id).order_by(Transaction.date.desc()).limit(50)
+        result = await self.db.execute(query)
+        transactions = list(result.scalars().all())
 
         if not transactions:
             return InsightResponse(
@@ -160,14 +123,7 @@ class AIService:
             )
 
     def _build_summary(self, transactions: list[Transaction]) -> str:
-        """Сформировать текстовую сводку транзакций для передачи в системный промпт LLM.
-
-        Аргументы:
-            transactions (list[Transaction]): Список объектов транзакций пользователя.
-
-        Возвращает:
-            str: Сводка транзакций (дата, тип, категория, сумма, описание).
-        """
+        """Сформировать текстовую сводку транзакций для передачи в системный промпт LLM."""
         lines = []
         for tx in transactions:
             parts = [
@@ -181,14 +137,7 @@ class AIService:
         return "\n".join(lines)
 
     async def _call_claude(self, summary: str) -> list[str]:
-        """Отправить запрос в Anthropic Messages API и распарсить JSON с рекомендациями.
-
-        Аргументы:
-            summary (str): Текстовая сводка по операциям пользователя.
-
-        Возвращает:
-            list[str]: Список полученных от нейросети советов.
-        """
+        """Отправить запрос в Anthropic Messages API и распарсить JSON с рекомендациями."""
         prompt = f"""Вот транзакции пользователя за последнее время:
 
 {summary}

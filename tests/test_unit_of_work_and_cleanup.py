@@ -8,7 +8,8 @@ from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import UnitOfWork, get_db
 from app.models.models import Category, Token, Transaction, TransactionType, User
@@ -23,10 +24,11 @@ from tests.conftest import TestingSessionLocal
 class TestUnitOfWork:
     """Модульные тесты для контекстного менеджера Unit of Work и механизма транзакций."""
 
-    def test_uow_commits_on_successful_exit(self):
+    @pytest.mark.asyncio
+    async def test_uow_commits_on_successful_exit(self):
         """Проверка фиксации (commit) всех изменений при успешном завершении блока UnitOfWork."""
         user_id = uuid.uuid4()
-        with UnitOfWork(session_factory=TestingSessionLocal) as session:
+        async with UnitOfWork(session_factory=TestingSessionLocal) as session:
             user = User(
                 id=user_id,
                 email="uow_commit_test@example.com",
@@ -36,17 +38,19 @@ class TestUnitOfWork:
             session.add(user)
 
         # Проверяем в новой сессии, что данные сохранились
-        with UnitOfWork(session_factory=TestingSessionLocal) as verify_session:
-            persisted_user = verify_session.query(User).filter(User.id == user_id).first()
+        async with UnitOfWork(session_factory=TestingSessionLocal) as verify_session:
+            res = await verify_session.execute(select(User).filter(User.id == user_id))
+            persisted_user = res.scalar_one_or_none()
             assert persisted_user is not None
             assert persisted_user.email == "uow_commit_test@example.com"
 
-    def test_uow_rollbacks_on_exception(self):
+    @pytest.mark.asyncio
+    async def test_uow_rollbacks_on_exception(self):
         """Проверка отката (rollback) всех изменений при возникновении ошибки внутри UnitOfWork."""
         user_id = uuid.uuid4()
 
         with pytest.raises(RuntimeError, match="Simulated failure"):
-            with UnitOfWork(session_factory=TestingSessionLocal) as session:
+            async with UnitOfWork(session_factory=TestingSessionLocal) as session:
                 user = User(
                     id=user_id,
                     email="uow_rollback_test@example.com",
@@ -54,18 +58,20 @@ class TestUnitOfWork:
                     hashed_password="hashed_pwd",
                 )
                 session.add(user)
-                session.flush()
+                await session.flush()
                 raise RuntimeError("Simulated failure")
 
         # Проверяем в новой сессии, что данные НЕ сохранились
-        with UnitOfWork(session_factory=TestingSessionLocal) as verify_session:
-            persisted_user = verify_session.query(User).filter(User.id == user_id).first()
+        async with UnitOfWork(session_factory=TestingSessionLocal) as verify_session:
+            res = await verify_session.execute(select(User).filter(User.id == user_id))
+            persisted_user = res.scalar_one_or_none()
             assert persisted_user is None
 
-    def test_composite_transaction_atomic_operations(self):
+    @pytest.mark.asyncio
+    async def test_composite_transaction_atomic_operations(self):
         """Проверка составной операции: добавление нескольких связанных записей в одной транзакции."""
         user_id = uuid.uuid4()
-        with UnitOfWork(session_factory=TestingSessionLocal) as session:
+        async with UnitOfWork(session_factory=TestingSessionLocal) as session:
             user = User(
                 id=user_id,
                 email="atomic_user@example.com",
@@ -73,10 +79,10 @@ class TestUnitOfWork:
                 hashed_password="hashed_pwd",
             )
             session.add(user)
-            session.flush()
+            await session.flush()
 
             tx_service = TransactionService(session)
-            tx1 = tx_service.create(
+            tx1 = await tx_service.create(
                 user_id=user_id,
                 payload=TransactionCreate(
                     amount=Decimal("150.00"),
@@ -85,7 +91,7 @@ class TestUnitOfWork:
                     description="Groceries",
                 ),
             )
-            tx2 = tx_service.create(
+            tx2 = await tx_service.create(
                 user_id=user_id,
                 payload=TransactionCreate(
                     amount=Decimal("5000.00"),
@@ -98,40 +104,44 @@ class TestUnitOfWork:
             assert tx2.id is not None
 
         # Проверяем в новой изолированной сессии
-        with UnitOfWork(session_factory=TestingSessionLocal) as verify_session:
-            user_txs = verify_session.query(Transaction).filter(Transaction.user_id == user_id).all()
+        async with UnitOfWork(session_factory=TestingSessionLocal) as verify_session:
+            res = await verify_session.execute(select(Transaction).filter(Transaction.user_id == user_id))
+            user_txs = res.scalars().all()
             assert len(user_txs) == 2
 
-    def test_get_db_generator_commit_and_rollback(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_get_db_generator_commit_and_rollback(self, monkeypatch):
         """Проверка генератора get_db: commit при штатном завершении и rollback при исключении."""
         # Проверяем штатное завершение
         db_gen = get_db()
-        session = next(db_gen)
-        assert isinstance(session, Session)
+        session = await anext(db_gen)
+        assert isinstance(session, AsyncSession)
         try:
             # Имитация завершения запроса
-            next(db_gen)
-        except StopIteration:
+            await anext(db_gen)
+        except StopAsyncIteration:
             pass
 
         # Проверяем ветку rollback при исключении
         db_gen_err = get_db()
-        _ = next(db_gen_err)
+        _ = await anext(db_gen_err)
         with pytest.raises(ValueError, match="Request error"):
-            db_gen_err.throw(ValueError("Request error"))
+            await db_gen_err.athrow(ValueError("Request error"))
 
 
 class TestTokenCleanup:
     """Тесты фоновой регламентной очистки истекших и отозванных токенов."""
 
-    def test_cleanup_expired_tokens_deletes_only_stale_records(self, db_session: Session, test_user: User):
+    @pytest.mark.asyncio
+    async def test_cleanup_expired_tokens_deletes_only_stale_records(self, db_session: AsyncSession, test_user: User):
         """Проверка, что удаляются только токены старше 30 дней, а свежие и активные сохраняются."""
         auth_service = AuthService(db_session)
         now = datetime.now(timezone.utc)
+        user_id = test_user.id
 
         # 1. Активный актуальный токен (не должен удаляться)
         active_token = Token(
-            user_id=test_user.id,
+            user_id=user_id,
             token_hash="active_token_current",
             expires_at=now + timedelta(days=7),
             created_at=now,
@@ -139,7 +149,7 @@ class TestTokenCleanup:
         )
         # 2. Недавно истекший токен (< 30 дней, не должен удаляться по 30-дневному порогу)
         recent_expired_token = Token(
-            user_id=test_user.id,
+            user_id=user_id,
             token_hash="recent_expired_token",
             expires_at=now - timedelta(days=5),
             created_at=now - timedelta(days=6),
@@ -147,7 +157,7 @@ class TestTokenCleanup:
         )
         # 3. Недавно отозванный токен (< 30 дней, не должен удаляться)
         recent_revoked_token = Token(
-            user_id=test_user.id,
+            user_id=user_id,
             token_hash="recent_revoked_token",
             expires_at=now + timedelta(days=1),
             created_at=now - timedelta(days=2),
@@ -155,7 +165,7 @@ class TestTokenCleanup:
         )
         # 4. Старый истекший токен (> 30 дней, ДОЛЖЕН быть удален)
         old_expired_token = Token(
-            user_id=test_user.id,
+            user_id=user_id,
             token_hash="old_expired_token_45d",
             expires_at=now - timedelta(days=45),
             created_at=now - timedelta(days=46),
@@ -163,7 +173,7 @@ class TestTokenCleanup:
         )
         # 5. Старый отозванный токен (> 30 дней, ДОЛЖЕН быть удален)
         old_revoked_token = Token(
-            user_id=test_user.id,
+            user_id=user_id,
             token_hash="old_revoked_token_60d",
             expires_at=now - timedelta(days=35),
             created_at=now - timedelta(days=60),
@@ -179,13 +189,14 @@ class TestTokenCleanup:
                 old_revoked_token,
             ]
         )
-        db_session.commit()
+        await db_session.commit()
 
         # Выполняем очистку токенов старше 30 дней
-        deleted_count = auth_service.cleanup_expired_tokens(retention_days=30)
+        deleted_count = await auth_service.cleanup_expired_tokens(retention_days=30)
         assert deleted_count == 2
 
-        remaining_tokens = db_session.query(Token).filter(Token.user_id == test_user.id).all()
+        res = await db_session.execute(select(Token).filter(Token.user_id == user_id))
+        remaining_tokens = res.scalars().all()
         remaining_strings = {t.token_hash for t in remaining_tokens}
 
         assert "active_token_current" in remaining_strings
@@ -194,7 +205,8 @@ class TestTokenCleanup:
         assert "old_expired_token_45d" not in remaining_strings
         assert "old_revoked_token_60d" not in remaining_strings
 
-    def test_cleanup_custom_retention_period(self, db_session: Session, test_user: User):
+    @pytest.mark.asyncio
+    async def test_cleanup_custom_retention_period(self, db_session: AsyncSession, test_user: User):
         """Проверка очистки с кастомным retention_days (например, 7 дней)."""
         auth_service = AuthService(db_session)
         now = datetime.now(timezone.utc)
@@ -214,15 +226,17 @@ class TestTokenCleanup:
             status="expired",
         )
         db_session.add_all([token_10d, token_2d])
-        db_session.commit()
+        await db_session.commit()
 
-        deleted = auth_service.cleanup_expired_tokens(retention_days=7)
+        deleted = await auth_service.cleanup_expired_tokens(retention_days=7)
         assert deleted == 1
 
-        remaining = db_session.query(Token).filter(Token.token_hash == "token_2d_ago").first()
+        res = await db_session.execute(select(Token).filter(Token.token_hash == "token_2d_ago"))
+        remaining = res.scalar_one_or_none()
         assert remaining is not None
 
-    def test_run_token_cleanup_task(self, db_session: Session, test_user: User):
+    @pytest.mark.asyncio
+    async def test_run_token_cleanup_task(self, db_session: AsyncSession, test_user: User):
         """Проверка выполнения вспомогательной функции run_token_cleanup с UnitOfWork."""
         now = datetime.now(timezone.utc)
         old_token = Token(
@@ -233,9 +247,9 @@ class TestTokenCleanup:
             status="expired",
         )
         db_session.add(old_token)
-        db_session.commit()
+        await db_session.commit()
 
-        deleted = run_token_cleanup(retention_days=30, session_factory=TestingSessionLocal)
+        deleted = await run_token_cleanup(retention_days=30, session_factory=TestingSessionLocal)
         assert deleted >= 1
 
     @pytest.mark.asyncio

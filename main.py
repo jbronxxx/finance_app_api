@@ -23,7 +23,7 @@ from app.limiter import limiter
 from app.routers import auth, budgets, insights, sync, transactions
 from app.schemas.schemas import ErrorResponse
 from app.tasks.token_cleanup import periodic_token_cleanup
-from config_reader.config_reader import config, validate_security_config
+from config_reader.config_reader import config
 from logger.logger import get_logger, reset_request_id, set_request_id
 
 logger = get_logger(__name__)
@@ -54,7 +54,6 @@ async def lifespan(app_instance: FastAPI):
     Аргументы:
         app_instance (FastAPI): Экземпляр веб-приложения FastAPI.
     """
-    validate_security_config(config)
     logger.info("Starting Finance App API")
     cleanup_task = asyncio.create_task(periodic_token_cleanup())
     background_tasks.add(cleanup_task)

@@ -13,11 +13,7 @@ from httpx import AsyncClient
 from app.exceptions import ErrorCode
 from app.limiter import limiter
 from app.schemas.schemas import UserLogin, UserRegister
-from config_reader.config_reader import (
-    DEFAULT_INSECURE_SECRET,
-    Config,
-    validate_security_config,
-)
+from config_reader.config_reader import Settings
 
 
 @pytest.fixture(autouse=True)
@@ -172,53 +168,54 @@ class TestDefaultSecretsValidation:
     @pytest.mark.asyncio
     async def test_production_mode_with_default_secret_raises_error(self):
         """Проверяет выброс исключения в продакшне (debug=False) с дефолтным SECRET_KEY."""
-        prod_config = Config(
-            debug=False,
-            host="0.0.0.0",
-            port=8000,
-            db_url="postgresql://user:pass@localhost:5432/db",
-            secret_key=DEFAULT_INSECURE_SECRET,
-            algorithm="HS256",
-            access_token_expire_minutes=60,
-            refresh_token_expire_days=7,
-            cors_origins=["*"],
-            cors_allow_credentials=True,
-            cors_allow_methods=["*"],
-            cors_allow_headers=["*"],
-            anthropic_api_key="",
-            ai_model="claude-haiku-4-5",
-            redis_url="redis://localhost:6379/0",
-        )
         with pytest.raises(ValueError, match="Недопустимо использовать значение по умолчанию"):
-            validate_security_config(prod_config)
+            Settings(
+                _env_file=None,
+                debug=False,
+                host="0.0.0.0",
+                port=8000,
+                db_url="postgresql://user:pass@localhost:5432/db",
+                secret_key="change-me-in-production-use-long-random-string",
+                algorithm="HS256",
+                access_token_expire_minutes=60,
+                refresh_token_expire_days=7,
+                cors_origins=["*"],
+                cors_allow_credentials=True,
+                cors_allow_methods=["*"],
+                cors_allow_headers=["*"],
+                anthropic_api_key="",
+                ai_model="claude-haiku-4-5",
+                redis_url="redis://localhost:6379/0",
+            )
 
     @pytest.mark.asyncio
     async def test_production_mode_with_empty_secret_raises_error(self):
         """Проверяет выброс исключения в продакшне (debug=False) с пустым SECRET_KEY."""
-        prod_config = Config(
-            debug=False,
-            host="0.0.0.0",
-            port=8000,
-            db_url="postgresql://user:pass@localhost:5432/db",
-            secret_key="",
-            algorithm="HS256",
-            access_token_expire_minutes=60,
-            refresh_token_expire_days=7,
-            cors_origins=["*"],
-            cors_allow_credentials=True,
-            cors_allow_methods=["*"],
-            cors_allow_headers=["*"],
-            anthropic_api_key="",
-            ai_model="claude-haiku-4-5",
-            redis_url="redis://localhost:6379/0",
-        )
         with pytest.raises(ValueError, match="Недопустимо использовать значение по умолчанию"):
-            validate_security_config(prod_config)
+            Settings(
+                _env_file=None,
+                debug=False,
+                host="0.0.0.0",
+                port=8000,
+                db_url="postgresql://user:pass@localhost:5432/db",
+                secret_key="",
+                algorithm="HS256",
+                access_token_expire_minutes=60,
+                refresh_token_expire_days=7,
+                cors_origins=["*"],
+                cors_allow_credentials=True,
+                cors_allow_methods=["*"],
+                cors_allow_headers=["*"],
+                anthropic_api_key="",
+                ai_model="claude-haiku-4-5",
+                redis_url="redis://localhost:6379/0",
+            )
 
     @pytest.mark.asyncio
     async def test_production_mode_with_secure_secret_passes(self):
         """Проверяет успешное прохождение валидации при наличии безопасного SECRET_KEY."""
-        prod_config = Config(
+        Settings(
+            _env_file=None,
             debug=False,
             host="0.0.0.0",
             port=8000,
@@ -235,18 +232,17 @@ class TestDefaultSecretsValidation:
             ai_model="claude-haiku-4-5",
             redis_url="redis://localhost:6379/0",
         )
-        # Не должно вызывать исключений
-        validate_security_config(prod_config)
 
     @pytest.mark.asyncio
     async def test_debug_mode_with_default_secret_allowed(self):
         """Проверяет допустимость дефолтного ключа в режиме отладки (debug=True)."""
-        dev_config = Config(
+        Settings(
+            _env_file=None,
             debug=True,
             host="0.0.0.0",
             port=8000,
             db_url="postgresql://user:pass@localhost:5432/db",
-            secret_key=DEFAULT_INSECURE_SECRET,
+            secret_key="change-me-in-production-use-long-random-string",
             algorithm="HS256",
             access_token_expire_minutes=60,
             refresh_token_expire_days=7,
@@ -258,5 +254,3 @@ class TestDefaultSecretsValidation:
             ai_model="claude-haiku-4-5",
             redis_url="redis://localhost:6379/0",
         )
-        # В dev-режиме дефолтный ключ не должен блокировать старт
-        validate_security_config(dev_config)

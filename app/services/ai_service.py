@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 import anthropic
 from fastapi.concurrency import run_in_threadpool
+from redis import asyncio as aioredis
 from sqlalchemy.orm import Session
 
 from app.models.models import Transaction
@@ -17,12 +18,11 @@ from logger.logger import get_logger
 
 logger = get_logger(__name__)
 
+redis_client = aioredis.from_url(config.redis_url, decode_responses=True)
+
 
 class AIService:
     """Сервис взаимодействия с LLM (Anthropic Claude) для анализа транзакций пользователя."""
-
-    # In-memory кэш аналитики: user_id -> (tx_hash, InsightResponse)
-    _cache: dict[uuid.UUID, tuple[str, InsightResponse]] = {}
 
     def __init__(self, db: Session, client: anthropic.AsyncAnthropic | None = None):
         """Инициализация сервиса с сессией базы данных и асинхронным клиентом Anthropic.
@@ -35,18 +35,18 @@ class AIService:
         self.client = client or anthropic.AsyncAnthropic(api_key=config.anthropic_api_key or None)
 
     @classmethod
-    def invalidate_cache(cls, user_id: uuid.UUID) -> None:
+    async def invalidate_cache(cls, user_id: uuid.UUID) -> None:
         """Инвалидировать кэш инсайтов для конкретного пользователя.
 
         Аргументы:
             user_id (uuid.UUID): Уникальный ID пользователя.
         """
-        cls._cache.pop(user_id, None)
+        await redis_client.delete(f"insights_cache:{user_id}")
 
     @classmethod
-    def clear_cache(cls) -> None:
+    async def clear_cache(cls) -> None:
         """Очистить весь кэш инсайтов."""
-        cls._cache.clear()
+        await redis_client.flushdb()
 
     @staticmethod
     def _extract_json(text: str) -> dict:
@@ -123,18 +123,31 @@ class AIService:
         summary = self._build_summary(transactions)
         tx_hash = hashlib.sha256(summary.encode("utf-8")).hexdigest()
 
+        cache_key = f"insights_cache:{user_id}"
+
         # Проверяем кэш инсайтов
-        cached = self._cache.get(user_id)
-        if cached:
-            cached_hash, cached_response = cached
-            if cached_hash == tx_hash:
-                logger.info(f"Returning cached AI insights for user {user_id}")
-                return cached_response
+        cached_data_str = await redis_client.get(cache_key)
+        if cached_data_str:
+            try:
+                cached_data = json.loads(cached_data_str)
+                cached_hash = cached_data.get("hash")
+                if cached_hash == tx_hash:
+                    logger.info(f"Returning cached AI insights for user {user_id}")
+                    return InsightResponse(
+                        insights=cached_data["insights"], generated_at=datetime.fromisoformat(cached_data["generated_at"])
+                    )
+            except Exception as e:
+                logger.error(f"Error reading cache for user {user_id}: {e}")
 
         try:
             insights = await self._call_claude(summary)
             response = InsightResponse(insights=insights, generated_at=datetime.now(timezone.utc))
-            self._cache[user_id] = (tx_hash, response)
+
+            cache_val = json.dumps(
+                {"hash": tx_hash, "insights": insights, "generated_at": response.generated_at.isoformat()}
+            )
+            await redis_client.setex(cache_key, 86400, cache_val)
+
             return response
         except Exception as e:
             logger.error(f"Error requesting insights from Anthropic API: {e}")

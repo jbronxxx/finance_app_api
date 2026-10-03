@@ -6,6 +6,9 @@ app:
 db:
   url: "postgresql://finance_user:finance_pass@db:5432/finance_db"
 
+redis:
+  url: "redis://localhost:6379/0"
+
 auth:
   secret_key: "change-me-in-production-use-long-random-string"
   algorithm: "HS256"

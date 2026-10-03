@@ -151,9 +151,13 @@ class AuthService:
         logger.debug(f"Генерация refresh-токена для пользователя {user_id_str} (истекает: {expire})")
         refresh_token_str = jwt.encode(payload, config.secret_key, algorithm=config.algorithm)
 
+        import hashlib
+
+        hashed_token = hashlib.sha256(refresh_token_str.encode()).hexdigest()
+
         db_token = Token(
             user_id=user_uuid,
-            token=refresh_token_str,
+            token=hashed_token,
             expires_at=expire,
             status="active",
         )
@@ -161,7 +165,7 @@ class AuthService:
         self.db.flush()
         self.db.refresh(db_token)
         logger.debug(f"Refresh-токен успешно сохранен в БД для пользователя {user_id_str}")
-        return db_token.token
+        return refresh_token_str
 
     def refresh_tokens(self, refresh_token_string: str) -> TokenResponse:
         """Обновить access_token и получить новый refresh_token по существующему refresh_token.
@@ -200,7 +204,10 @@ class AuthService:
                 message="Недействительный или истекший refresh токен",
             )
 
-        db_token = self.db.query(Token).filter(Token.token == refresh_token_string, Token.status == "active").first()
+        import hashlib
+
+        hashed_token = hashlib.sha256(refresh_token_string.encode()).hexdigest()
+        db_token = self.db.query(Token).filter(Token.token == hashed_token, Token.status == "active").first()
 
         if not db_token:
             logger.warning("Refresh-токен отсутствует в базе данных либо неактивен")

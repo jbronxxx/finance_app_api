@@ -83,7 +83,7 @@ class TestAuthServiceUnit:
         import hashlib
 
         hashed = hashlib.sha256(refresh_token.encode()).hexdigest()
-        old_token = db_session.query(Token).filter(Token.token == hashed).first()
+        old_token = db_session.query(Token).filter(Token.token_hash == hashed).first()
         assert old_token is not None
         assert old_token.status == "revoked"
 
@@ -95,7 +95,7 @@ class TestAuthServiceUnit:
         import hashlib
 
         hashed = hashlib.sha256(refresh_token.encode()).hexdigest()
-        db_token = db_session.query(Token).filter(Token.token == hashed).first()
+        db_token = db_session.query(Token).filter(Token.token_hash == hashed).first()
         db_token.status = "revoked"
         db_session.commit()
 
@@ -112,7 +112,7 @@ class TestAuthServiceUnit:
         import hashlib
 
         hashed = hashlib.sha256(refresh_token.encode()).hexdigest()
-        db_token = db_session.query(Token).filter(Token.token == hashed).first()
+        db_token = db_session.query(Token).filter(Token.token_hash == hashed).first()
         db_token.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
         db_session.commit()
 

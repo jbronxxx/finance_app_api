@@ -1,14 +1,22 @@
 # syntax=docker/dockerfile:1
-FROM python:3.12-slim
-
+FROM python:3.12-slim AS base
 WORKDIR /app
 
-COPY requirements.txt .
+# Stage 1: Зависимости и тесты
+FROM base AS test
+COPY requirements.txt requirements-dev.txt ./
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --default-timeout=100 -r requirements-dev.txt
+COPY . .
+# Запуск тестов. Если они упадут, сборка Docker завершится с ошибкой
+RUN pytest tests/
+
+# Stage 2: Продакшен образ (собирается только если тесты прошли)
+FROM base AS production
+COPY requirements.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --default-timeout=100 -r requirements.txt
-
 COPY . .
 
 EXPOSE 8000
-
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

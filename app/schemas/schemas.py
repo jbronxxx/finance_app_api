@@ -105,8 +105,7 @@ class UserRegister(BaseModel):
     password: str = Field(
         ...,
         min_length=6,
-        max_length=72,
-        description="Пароль пользователя (от 6 до 72 символов, минимум 1 буква и 1 цифра)",
+        description="Пароль пользователя (от 6 символов, до 72 байт, минимум 1 буква и 1 цифра)",
     )
     name: str = Field(..., min_length=1, max_length=100, description="Имя пользователя")
 
@@ -132,7 +131,15 @@ class UserLogin(BaseModel):
     """
 
     email: EmailStr = Field(..., description="Email адрес пользователя")
-    password: str = Field(..., max_length=72, description="Пароль пользователя")
+    password: str = Field(..., description="Пароль пользователя")
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_length(cls, v: str) -> str:
+        """Проверяет пароль на ограничение длины bcrypt (72 байта)."""
+        if len(v.encode("utf-8")) > 72:
+            raise ValueError("Длина пароля не должна превышать 72 байта")
+        return v
 
 
 class RefreshTokenRequest(BaseModel):

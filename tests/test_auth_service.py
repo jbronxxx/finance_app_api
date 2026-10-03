@@ -80,7 +80,10 @@ class TestAuthServiceUnit:
         assert new_tokens.refresh_token != refresh_token
 
         # Старый refresh токен должен быть revoked
-        old_token = db_session.query(Token).filter(Token.token == refresh_token).first()
+        import hashlib
+
+        hashed = hashlib.sha256(refresh_token.encode()).hexdigest()
+        old_token = db_session.query(Token).filter(Token.token == hashed).first()
         assert old_token is not None
         assert old_token.status == "revoked"
 
@@ -89,7 +92,10 @@ class TestAuthServiceUnit:
         service = AuthService(db_session)
         refresh_token = service.create_refresh_token(test_user.id)
         # Отзываем токен
-        db_token = db_session.query(Token).filter(Token.token == refresh_token).first()
+        import hashlib
+
+        hashed = hashlib.sha256(refresh_token.encode()).hexdigest()
+        db_token = db_session.query(Token).filter(Token.token == hashed).first()
         db_token.status = "revoked"
         db_session.commit()
 
@@ -103,7 +109,10 @@ class TestAuthServiceUnit:
         refresh_token = service.create_refresh_token(test_user.id)
 
         # Устанавливаем дату истечения в прошлом
-        db_token = db_session.query(Token).filter(Token.token == refresh_token).first()
+        import hashlib
+
+        hashed = hashlib.sha256(refresh_token.encode()).hexdigest()
+        db_token = db_session.query(Token).filter(Token.token == hashed).first()
         db_token.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
         db_session.commit()
 

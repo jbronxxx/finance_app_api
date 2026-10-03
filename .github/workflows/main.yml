@@ -40,11 +40,11 @@ jobs:
         run: |
           pytest -v --cov=app --cov-report=term-missing
         env:
-          APP_DEBUG: true
-          APP_HOST: 0.0.0.0
-          APP_PORT: 8000
-          DATABASE_URL: sqlite+aiosqlite:///:memory:
-          SECRET_KEY: test_secret_key
-          AUTH_ALGORITHM: HS256
-          ACCESS_TOKEN_EXPIRE_MINUTES: 60
-          REFRESH_TOKEN_EXPIRE_DAYS: 7
+          APP_DEBUG: "true"
+          APP_HOST: "0.0.0.0"
+          APP_PORT: "8000"
+          DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+          SECRET_KEY: "test_secret_key"
+          AUTH_ALGORITHM: "HS256"
+          ACCESS_TOKEN_EXPIRE_MINUTES: "60"
+          REFRESH_TOKEN_EXPIRE_DAYS: "7"

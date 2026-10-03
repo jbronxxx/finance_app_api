@@ -66,7 +66,10 @@ class TransactionService:
                 cursor_id = uuid.UUID(cursor_data["i"])
 
                 query = query.where(
-                    or_(Transaction.date < cursor_date, and_(Transaction.date == cursor_date, Transaction.id < cursor_id))
+                    or_(
+                        Transaction.date < cursor_date,
+                        and_(Transaction.date == cursor_date, Transaction.id < cursor_id),
+                    )
                 )
             except Exception as e:
                 logger.warning(f"Некорректный курсор {cursor}: {e}")

@@ -69,14 +69,24 @@ class TestFinTechDecimalPrecision:
         """Сумма транзакции <= 0 отклоняется валидацией Pydantic."""
         zero_res = await client.post(
             "/api/v1/transactions/",
-            json={"amount": 0, "description": "Ноль", "category": "food", "type": "expense"},
+            json={
+                "amount": 0,
+                "description": "Ноль",
+                "category": "food",
+                "type": "expense",
+            },
             headers=auth_headers,
         )
         assert zero_res.status_code == 422
 
         neg_res = await client.post(
             "/api/v1/transactions/",
-            json={"amount": -10.50, "description": "Минус", "category": "food", "type": "expense"},
+            json={
+                "amount": -10.50,
+                "description": "Минус",
+                "category": "food",
+                "type": "expense",
+            },
             headers=auth_headers,
         )
         assert neg_res.status_code == 422

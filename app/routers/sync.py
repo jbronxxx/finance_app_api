@@ -20,11 +20,17 @@ logger = get_logger(__name__)
 
 router = APIRouter(
     responses={
-        400: {"model": ErrorResponse, "description": "Ошибка пакетной синхронизации (SYNC_FAILED)"},
+        400: {
+            "model": ErrorResponse,
+            "description": "Ошибка пакетной синхронизации (SYNC_FAILED)",
+        },
         401: {"model": ErrorResponse, "description": "Требуется авторизация"},
         403: {"model": ErrorResponse, "description": "Доступ запрещен"},
         422: {"model": ErrorResponse, "description": "Ошибка валидации входных данных"},
-        500: {"model": ErrorResponse, "description": "Внутренняя ошибка сервера при сохранении"},
+        500: {
+            "model": ErrorResponse,
+            "description": "Внутренняя ошибка сервера при сохранении",
+        },
     }
 )
 

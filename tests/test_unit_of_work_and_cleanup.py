@@ -256,7 +256,11 @@ class TestTokenCleanup:
     async def test_periodic_token_cleanup_task_lifecycle(self):
         """Проверка запуска и отмены асинхронной корутины periodic_token_cleanup."""
         cleanup_task = asyncio.create_task(
-            periodic_token_cleanup(interval_seconds=1, retention_days=30, session_factory=TestingSessionLocal)
+            periodic_token_cleanup(
+                interval_seconds=1,
+                retention_days=30,
+                session_factory=TestingSessionLocal,
+            )
         )
         await asyncio.sleep(0.05)
         cleanup_task.cancel()

@@ -163,7 +163,12 @@ class TestBudgetServiceUnit:
         )
         await service.create(
             test_user.id,
-            BudgetCreate(category=Category.entertainment, limit_amount=7000.0, month=10, year=2026),
+            BudgetCreate(
+                category=Category.entertainment,
+                limit_amount=7000.0,
+                month=10,
+                year=2026,
+            ),
         )
 
         # Удаляем по ID

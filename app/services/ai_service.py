@@ -97,7 +97,8 @@ class AIService:
                 if cached_hash == tx_hash:
                     logger.info(f"Returning cached AI insights for user {user_id}")
                     return InsightResponse(
-                        insights=cached_data["insights"], generated_at=datetime.fromisoformat(cached_data["generated_at"])
+                        insights=cached_data["insights"],
+                        generated_at=datetime.fromisoformat(cached_data["generated_at"]),
                     )
             except Exception as e:
                 logger.error(f"Error reading cache for user {user_id}: {e}")
@@ -107,7 +108,11 @@ class AIService:
             response = InsightResponse(insights=insights, generated_at=datetime.now(timezone.utc))
 
             cache_val = json.dumps(
-                {"hash": tx_hash, "insights": insights, "generated_at": response.generated_at.isoformat()}
+                {
+                    "hash": tx_hash,
+                    "insights": insights,
+                    "generated_at": response.generated_at.isoformat(),
+                }
             )
             await redis_client.setex(cache_key, 86400, cache_val)
 

@@ -36,7 +36,10 @@ class TestCorsMiddleware:
         )
         assert response.status_code == 200
         assert "access-control-allow-origin" in response.headers
-        assert response.headers["access-control-allow-origin"] in ("*", "http://localhost:3000")
+        assert response.headers["access-control-allow-origin"] in (
+            "*",
+            "http://localhost:3000",
+        )
 
     @pytest.mark.asyncio
     async def test_cors_preflight_options_request(self, client: AsyncClient):
@@ -51,7 +54,10 @@ class TestCorsMiddleware:
         )
         assert response.status_code == 200
         assert "access-control-allow-origin" in response.headers
-        assert response.headers["access-control-allow-origin"] in ("*", "http://localhost:3000")
+        assert response.headers["access-control-allow-origin"] in (
+            "*",
+            "http://localhost:3000",
+        )
         assert "access-control-allow-methods" in response.headers
 
 
@@ -61,7 +67,10 @@ class TestPasswordValidation:
     @pytest.mark.asyncio
     async def test_register_password_without_numbers_rejected(self):
         """Проверяет отклонение пароля без цифр."""
-        with pytest.raises(ValueError, match="Пароль должен содержать как минимум одну букву и одну цифру"):
+        with pytest.raises(
+            ValueError,
+            match="Пароль должен содержать как минимум одну букву и одну цифру",
+        ):
             UserRegister(
                 email="user@example.com",
                 password="OnlyLettersPassword",
@@ -71,7 +80,10 @@ class TestPasswordValidation:
     @pytest.mark.asyncio
     async def test_register_password_without_letters_rejected(self):
         """Проверяет отклонение пароля без букв."""
-        with pytest.raises(ValueError, match="Пароль должен содержать как минимум одну букву и одну цифру"):
+        with pytest.raises(
+            ValueError,
+            match="Пароль должен содержать как минимум одну букву и одну цифру",
+        ):
             UserRegister(
                 email="user@example.com",
                 password="1234567890",
@@ -148,13 +160,21 @@ class TestRateLimiting:
         for i in range(5):
             await client.post(
                 "/api/v1/auth/register",
-                json={"email": f"ratelimit{i}@example.com", "password": "Password123", "name": f"User {i}"},
+                json={
+                    "email": f"ratelimit{i}@example.com",
+                    "password": "Password123",
+                    "name": f"User {i}",
+                },
             )
 
         # 6-й запрос превышает лимит
         response = await client.post(
             "/api/v1/auth/register",
-            json={"email": "ratelimit_over@example.com", "password": "Password123", "name": "Over Limit"},
+            json={
+                "email": "ratelimit_over@example.com",
+                "password": "Password123",
+                "name": "Over Limit",
+            },
         )
         assert response.status_code == 429
         data = response.json()

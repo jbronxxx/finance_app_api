@@ -23,7 +23,11 @@ class TestSyncEndpointIntegration:
 
     @pytest.mark.asyncio
     async def test_sync_create_transactions_and_budgets(
-        self, client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession, test_user: User
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        test_user: User,
     ):
         """Пакетная синхронизация создает новые транзакции и бюджеты."""
         user_id = test_user.id
@@ -89,7 +93,11 @@ class TestSyncEndpointIntegration:
 
     @pytest.mark.asyncio
     async def test_sync_upsert_existing_transaction(
-        self, client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession, test_user: User
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        test_user: User,
     ):
         """Синхронизация обновляет существующую транзакцию при совпадении ID."""
         tx_id = uuid.uuid4()
@@ -132,7 +140,11 @@ class TestSyncEndpointIntegration:
 
     @pytest.mark.asyncio
     async def test_sync_delete_budgets(
-        self, client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession, test_user: User
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        test_user: User,
     ):
         """Синхронизация удаляет бюджеты по deleted_budget_ids, deleted_budgets и check_deleted."""
         user_id = test_user.id
@@ -196,7 +208,11 @@ class TestSyncEndpointIntegration:
 
     @pytest.mark.asyncio
     async def test_sync_batch_multiple_items_and_enrichment(
-        self, client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession, test_user: User
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        test_user: User,
     ):
         """Пакетная синхронизация 10+ транзакций и нескольких бюджетов корректно рассчитывает агрегаты."""
         tx_items = []

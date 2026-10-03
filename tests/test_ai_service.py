@@ -194,7 +194,10 @@ class TestAIService:
             result = await service.get_insights(uuid.uuid4())
 
         assert isinstance(result, InsightResponse)
-        assert result.insights == ["Траты на еду в норме", "Планируйте бюджет на неделю"]
+        assert result.insights == [
+            "Траты на еду в норме",
+            "Планируйте бюджет на неделю",
+        ]
         assert result.generated_at.tzinfo == timezone.utc
         mock_client.messages.create.assert_awaited_once()
 

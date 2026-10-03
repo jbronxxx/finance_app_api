@@ -84,7 +84,12 @@ class BadRequestException(AppException):
         message: str = "Некорректный запрос",
         details: Optional[dict[str, Any]] = None,
     ):
-        super().__init__(code=code, message=message, status_code=status.HTTP_400_BAD_REQUEST, details=details)
+        super().__init__(
+            code=code,
+            message=message,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            details=details,
+        )
 
 
 class UnauthorizedException(AppException):
@@ -115,7 +120,12 @@ class ForbiddenException(AppException):
         message: str = "Доступ запрещен",
         details: Optional[dict[str, Any]] = None,
     ):
-        super().__init__(code=code, message=message, status_code=status.HTTP_403_FORBIDDEN, details=details)
+        super().__init__(
+            code=code,
+            message=message,
+            status_code=status.HTTP_403_FORBIDDEN,
+            details=details,
+        )
 
 
 class NotFoundException(AppException):
@@ -127,7 +137,12 @@ class NotFoundException(AppException):
         message: str = "Ресурс не найден",
         details: Optional[dict[str, Any]] = None,
     ):
-        super().__init__(code=code, message=message, status_code=status.HTTP_404_NOT_FOUND, details=details)
+        super().__init__(
+            code=code,
+            message=message,
+            status_code=status.HTTP_404_NOT_FOUND,
+            details=details,
+        )
 
 
 class ServiceUnavailableException(AppException):

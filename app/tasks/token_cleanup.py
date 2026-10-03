@@ -38,4 +38,7 @@ async def periodic_token_cleanup(
             logger.info("Фоновая задача очистки токенов успешно остановлена (Cancelled)")
             break
         except Exception as e:
-            logger.error(f"Непредвиденная ошибка в периодической задаче очистки токенов: {e}", exc_info=True)
+            logger.error(
+                f"Непредвиденная ошибка в периодической задаче очистки токенов: {e}",
+                exc_info=True,
+            )

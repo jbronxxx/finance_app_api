@@ -77,12 +77,22 @@ class TestTransactionServiceUnit:
         # Создаем транзакцию для test_user
         await service.create(
             user_id,
-            TransactionCreate(amount=100.0, description="My tx", category=Category.food, type=TransactionType.expense),
+            TransactionCreate(
+                amount=100.0,
+                description="My tx",
+                category=Category.food,
+                type=TransactionType.expense,
+            ),
         )
         # Создаем транзакцию для other_user
         await service.create(
             other_user_id,
-            TransactionCreate(amount=200.0, description="Other tx", category=Category.food, type=TransactionType.expense),
+            TransactionCreate(
+                amount=200.0,
+                description="Other tx",
+                category=Category.food,
+                type=TransactionType.expense,
+            ),
         )
 
         user_txs, has_more, next_cursor = await service.get_all(user_id)
@@ -96,7 +106,12 @@ class TestTransactionServiceUnit:
         service = TransactionService(db_session)
         tx = await service.create(
             test_user.id,
-            TransactionCreate(amount=150.0, description="Recent tx", category=Category.food, type=TransactionType.expense),
+            TransactionCreate(
+                amount=150.0,
+                description="Recent tx",
+                category=Category.food,
+                type=TransactionType.expense,
+            ),
         )
 
         # Запрос с since в будущем не вернет ничего
@@ -147,7 +162,12 @@ class TestTransactionServiceUnit:
         service = TransactionService(db_session)
         tx = await service.create(
             test_user.id,
-            TransactionCreate(amount=150.0, description="To delete", category=Category.food, type=TransactionType.expense),
+            TransactionCreate(
+                amount=150.0,
+                description="To delete",
+                category=Category.food,
+                type=TransactionType.expense,
+            ),
         )
 
         await service.delete(test_user.id, tx.id)
@@ -182,7 +202,12 @@ class TestTransactionServiceUnit:
 
         tx = await service.create(
             other_user_id,
-            TransactionCreate(amount=150.0, description="Other tx", category=Category.food, type=TransactionType.expense),
+            TransactionCreate(
+                amount=150.0,
+                description="Other tx",
+                category=Category.food,
+                type=TransactionType.expense,
+            ),
         )
 
         with pytest.raises(NotFoundException) as exc_info:
@@ -197,7 +222,12 @@ class TestTransactionServiceUnit:
 
         await service.create(
             test_user.id,
-            TransactionCreate(amount=100.0, description="Tx 1", category=Category.food, type=TransactionType.expense),
+            TransactionCreate(
+                amount=100.0,
+                description="Tx 1",
+                category=Category.food,
+                type=TransactionType.expense,
+            ),
         )
         etag2 = await service.get_etag(test_user.id)
         assert etag1 != etag2

@@ -284,7 +284,10 @@ class BudgetResponse(BaseModel):
 class TransactionSyncItem(BaseModel):
     """Схема отдельной транзакции при пакетной синхронизации."""
 
-    id: Optional[uuid.UUID] = Field(default=None, description="ID транзакции на сервере (если транзакция уже существует)")
+    id: Optional[uuid.UUID] = Field(
+        default=None,
+        description="ID транзакции на сервере (если транзакция уже существует)",
+    )
     local_id: Optional[int] = Field(default=None, description="Локальный ID на клиенте")
     type: TransactionType = Field(..., description="Тип операции")
     category: Category = Field(..., description="Категория")
@@ -319,7 +322,8 @@ class SyncPayload(BaseModel):
     budgets: List[BudgetSyncItem] = Field(default_factory=list, description="Список бюджетов")
     deleted_budget_ids: List[uuid.UUID] = Field(default_factory=list, description="Список ID бюджетов для удаления")
     deleted_budgets: List[BudgetSyncItem] = Field(
-        default_factory=list, description="Список объектов бюджетов для удаления по категории и периоду"
+        default_factory=list,
+        description="Список объектов бюджетов для удаления по категории и периоду",
     )
 
 

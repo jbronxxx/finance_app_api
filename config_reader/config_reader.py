@@ -14,7 +14,10 @@ class Settings(BaseSettings):
     host: str = Field("0.0.0.0", alias="APP_HOST")
     port: int = Field(8000, alias="APP_PORT")
 
-    db_url: str = Field("postgresql://finance_user:finance_pass@db:5432/finance_db", alias="DATABASE_URL")
+    db_url: str = Field(
+        "postgresql://finance_user:finance_pass@db:5432/finance_db",
+        alias="DATABASE_URL",
+    )
 
     secret_key: str = Field("change-me-in-production-use-long-random-string", alias="SECRET_KEY")
     algorithm: str = Field("HS256", alias="AUTH_ALGORITHM")
@@ -31,7 +34,12 @@ class Settings(BaseSettings):
 
     redis_url: str = Field("redis://localhost:6379/0", alias="REDIS_URL")
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", populate_by_name=True)
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        populate_by_name=True,
+    )
 
     @model_validator(mode="before")
     @classmethod

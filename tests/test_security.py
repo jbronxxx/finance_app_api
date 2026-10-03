@@ -36,7 +36,10 @@ class TestCorsMiddleware:
         )
         assert response.status_code == 200
         assert "access-control-allow-origin" in response.headers
-        assert response.headers["access-control-allow-origin"] in ("*", "http://localhost:3000")
+        assert response.headers["access-control-allow-origin"] in (
+            "*",
+            "http://localhost:3000",
+        )
 
     @pytest.mark.asyncio
     async def test_cors_preflight_options_request(self, client: AsyncClient):
@@ -51,7 +54,10 @@ class TestCorsMiddleware:
         )
         assert response.status_code == 200
         assert "access-control-allow-origin" in response.headers
-        assert response.headers["access-control-allow-origin"] in ("*", "http://localhost:3000")
+        assert response.headers["access-control-allow-origin"] in (
+            "*",
+            "http://localhost:3000",
+        )
         assert "access-control-allow-methods" in response.headers
 
 
@@ -61,7 +67,10 @@ class TestPasswordValidation:
     @pytest.mark.asyncio
     async def test_register_password_without_numbers_rejected(self):
         """Проверяет отклонение пароля без цифр."""
-        with pytest.raises(ValueError, match="Пароль должен содержать как минимум одну букву и одну цифру"):
+        with pytest.raises(
+            ValueError,
+            match="Пароль должен содержать как минимум одну букву и одну цифру",
+        ):
             UserRegister(
                 email="user@example.com",
                 password="OnlyLettersPassword",
@@ -71,7 +80,10 @@ class TestPasswordValidation:
     @pytest.mark.asyncio
     async def test_register_password_without_letters_rejected(self):
         """Проверяет отклонение пароля без букв."""
-        with pytest.raises(ValueError, match="Пароль должен содержать как минимум одну букву и одну цифру"):
+        with pytest.raises(
+            ValueError,
+            match="Пароль должен содержать как минимум одну букву и одну цифру",
+        ):
             UserRegister(
                 email="user@example.com",
                 password="1234567890",
@@ -148,13 +160,21 @@ class TestRateLimiting:
         for i in range(5):
             await client.post(
                 "/api/v1/auth/register",
-                json={"email": f"ratelimit{i}@example.com", "password": "Password123", "name": f"User {i}"},
+                json={
+                    "email": f"ratelimit{i}@example.com",
+                    "password": "Password123",
+                    "name": f"User {i}",
+                },
             )
 
         # 6-й запрос превышает лимит
         response = await client.post(
             "/api/v1/auth/register",
-            json={"email": "ratelimit_over@example.com", "password": "Password123", "name": "Over Limit"},
+            json={
+                "email": "ratelimit_over@example.com",
+                "password": "Password123",
+                "name": "Over Limit",
+            },
         )
         assert response.status_code == 429
         data = response.json()
@@ -166,8 +186,10 @@ class TestDefaultSecretsValidation:
     """Тестирование проверки дефолтных секретов в продакшне."""
 
     @pytest.mark.asyncio
-    async def test_production_mode_with_default_secret_raises_error(self):
+    async def test_production_mode_with_default_secret_raises_error(self, monkeypatch):
         """Проверяет выброс исключения в продакшне (debug=False) с дефолтным SECRET_KEY."""
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+        monkeypatch.delenv("APP_DEBUG", raising=False)
         with pytest.raises(ValueError, match="Недопустимо использовать значение по умолчанию"):
             Settings(
                 _env_file=None,
@@ -189,8 +211,10 @@ class TestDefaultSecretsValidation:
             )
 
     @pytest.mark.asyncio
-    async def test_production_mode_with_empty_secret_raises_error(self):
+    async def test_production_mode_with_empty_secret_raises_error(self, monkeypatch):
         """Проверяет выброс исключения в продакшне (debug=False) с пустым SECRET_KEY."""
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+        monkeypatch.delenv("APP_DEBUG", raising=False)
         with pytest.raises(ValueError, match="Недопустимо использовать значение по умолчанию"):
             Settings(
                 _env_file=None,
@@ -212,8 +236,10 @@ class TestDefaultSecretsValidation:
             )
 
     @pytest.mark.asyncio
-    async def test_production_mode_with_secure_secret_passes(self):
+    async def test_production_mode_with_secure_secret_passes(self, monkeypatch):
         """Проверяет успешное прохождение валидации при наличии безопасного SECRET_KEY."""
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+        monkeypatch.delenv("APP_DEBUG", raising=False)
         Settings(
             _env_file=None,
             debug=False,
@@ -234,8 +260,10 @@ class TestDefaultSecretsValidation:
         )
 
     @pytest.mark.asyncio
-    async def test_debug_mode_with_default_secret_allowed(self):
+    async def test_debug_mode_with_default_secret_allowed(self, monkeypatch):
         """Проверяет допустимость дефолтного ключа в режиме отладки (debug=True)."""
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+        monkeypatch.delenv("APP_DEBUG", raising=False)
         Settings(
             _env_file=None,
             debug=True,

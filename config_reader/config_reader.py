@@ -45,6 +45,7 @@ class Config:
         cors_allow_headers (list[str]): Список разрешенных заголовков CORS.
         anthropic_api_key (str): Ключ API для интеграции с Anthropic Claude.
         ai_model (str): Название используемой модели Anthropic Claude.
+        redis_url (str): URL для подключения к Redis.
     """
 
     # Настройки приложения
@@ -70,6 +71,9 @@ class Config:
     # Настройки Anthropic AI
     anthropic_api_key: str
     ai_model: str
+
+    # Настройки Redis
+    redis_url: str
 
 
 def validate_security_config(cfg: Config) -> None:
@@ -158,6 +162,7 @@ def load_config(path: str = "app_config.yaml") -> Config:
         cors_allow_headers=cors_allow_headers,
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
         ai_model=os.getenv("AI_MODEL", raw["ai"]["model"]),
+        redis_url=os.getenv("REDIS_URL", raw.get("redis", {}).get("url", "redis://localhost:6379/0")),
     )
 
     validate_security_config(cfg)

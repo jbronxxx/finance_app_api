@@ -83,13 +83,6 @@ class TestBudgets:
 class TestInsights:
     """Набор тестов для роутера AI-инсайтов (/api/v1/insights)."""
 
-    @pytest.fixture(autouse=True)
-    def clean_cache(self):
-        """Очищать кэш AIService перед каждым тестом."""
-        AIService.clear_cache()
-        yield
-        AIService.clear_cache()
-
     def test_insights_unauthorized(self):
         """Запрос AI-инсайтов без токена возвращает 403 Forbidden."""
         response = client.get("/api/v1/insights/")

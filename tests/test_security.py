@@ -176,6 +176,7 @@ class TestDefaultSecretsValidation:
             cors_allow_headers=["*"],
             anthropic_api_key="",
             ai_model="claude-haiku-4-5",
+            redis_url="redis://localhost:6379/0",
         )
         with pytest.raises(ValueError, match="Недопустимо использовать значение по умолчанию"):
             validate_security_config(prod_config)
@@ -197,6 +198,7 @@ class TestDefaultSecretsValidation:
             cors_allow_headers=["*"],
             anthropic_api_key="",
             ai_model="claude-haiku-4-5",
+            redis_url="redis://localhost:6379/0",
         )
         with pytest.raises(ValueError, match="Недопустимо использовать значение по умолчанию"):
             validate_security_config(prod_config)
@@ -218,6 +220,7 @@ class TestDefaultSecretsValidation:
             cors_allow_headers=["*"],
             anthropic_api_key="",
             ai_model="claude-haiku-4-5",
+            redis_url="redis://localhost:6379/0",
         )
         # Не должно вызывать исключений
         validate_security_config(prod_config)
@@ -239,6 +242,7 @@ class TestDefaultSecretsValidation:
             cors_allow_headers=["*"],
             anthropic_api_key="",
             ai_model="claude-haiku-4-5",
+            redis_url="redis://localhost:6379/0",
         )
         # В dev-режиме дефолтный ключ не должен блокировать старт
         validate_security_config(dev_config)

@@ -18,13 +18,6 @@ from app.services.ai_service import AIService
 class TestAIService:
     """Набор тестов для AIService."""
 
-    @pytest.fixture(autouse=True)
-    def clean_cache(self):
-        """Очищать кэш AIService перед каждым тестом."""
-        AIService.clear_cache()
-        yield
-        AIService.clear_cache()
-
     def test_init_creates_async_anthropic_client(self):
         """Проверка, что AIService инициализирует асинхронный клиент AsyncAnthropic."""
         mock_db = MagicMock()
@@ -324,7 +317,7 @@ class TestAIService:
             assert second_resp.insights == ["Пользуйтесь проездным"]
             # API Claude НЕ вызывался повторно!
             assert mock_client.messages.create.await_count == 1
-            assert second_resp is first_resp
+            assert second_resp.generated_at == first_resp.generated_at
 
     @pytest.mark.asyncio
     async def test_insights_caching_invalidates_when_transactions_change(self):
@@ -380,18 +373,20 @@ class TestAIService:
             assert second_resp.insights == ["Совет 2 - траты выросли"]
             assert mock_client.messages.create.await_count == 2
 
-    def test_invalidate_and_clear_cache(self):
+    @pytest.mark.asyncio
+    async def test_invalidate_and_clear_cache(self):
         """Проверка методов ручной инвалидации кэша."""
+        from app.services.ai_service import redis_client
+
         u1 = uuid.uuid4()
         u2 = uuid.uuid4()
-        resp = InsightResponse(insights=["Тест"], generated_at=datetime.now(timezone.utc))
 
-        AIService._cache[u1] = ("hash1", resp)
-        AIService._cache[u2] = ("hash2", resp)
+        await redis_client.set(f"insights_cache:{u1}", "data1")
+        await redis_client.set(f"insights_cache:{u2}", "data2")
 
-        AIService.invalidate_cache(u1)
-        assert u1 not in AIService._cache
-        assert u2 in AIService._cache
+        await AIService.invalidate_cache(u1)
+        assert await redis_client.get(f"insights_cache:{u1}") is None
+        assert await redis_client.get(f"insights_cache:{u2}") == "data2"
 
-        AIService.clear_cache()
-        assert len(AIService._cache) == 0
+        await AIService.clear_cache()
+        assert await redis_client.get(f"insights_cache:{u2}") is None

@@ -1,8 +1,10 @@
 """Модуль общих фикстур pytest для изолированного тестирования приложения."""
 
 import uuid
+from unittest.mock import patch
 
 import bcrypt
+import fakeredis
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -15,6 +17,7 @@ from app.services.auth_service import AuthService
 from main import app
 
 # Создаем in-memory базу SQLite с пулом StaticPool
+
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
 engine = create_engine(
@@ -91,3 +94,11 @@ def auth_token(db_session: Session, test_user: User) -> str:
 def auth_headers(auth_token: str) -> dict[str, str]:
     """Фикстура HTTP-заголовков с Bearer-токеном авторизации."""
     return {"Authorization": f"Bearer {auth_token}"}
+
+
+@pytest.fixture(autouse=True)
+def mock_redis_client():
+    """Фикстура для подмены redis_client в AIService на FakeAsyncRedis."""
+    fake_redis = fakeredis.FakeAsyncRedis(decode_responses=True)
+    with patch("app.services.ai_service.redis_client", fake_redis):
+        yield fake_redis

@@ -53,6 +53,8 @@ SECRET_KEY=change-me-in-production-use-long-random-string
 ACCESS_TOKEN_EXPIRE_MINUTES=60
 REFRESH_TOKEN_EXPIRE_DAYS=7
 ANTHROPIC_API_KEY=sk-ant-api03-...
+GRAFANA_ADMIN_USER=admin
+GRAFANA_ADMIN_PASSWORD=admin
 ```
 > [!NOTE]
 > Если ключ `ANTHROPIC_API_KEY` не указан или оставлен пустым, сервис AI-инсайтов автоматически переключится на безопасный режим заглушек и приложение продолжит работать без ошибок.
@@ -134,6 +136,17 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - `POST /api/v1/auth/refresh` — бессрочное/бесшовное обновление `access_token` с помощью `refresh_token` (механизм Refresh Token Rotation)
 - `POST /api/v1/auth/logout` — выход из системы и отзыв активного токена
 - `GET /api/v1/auth/me` — получение данных текущего авторизованного пользователя
+
+---
+
+## 📊 Мониторинг и Логирование (Observability)
+
+В проект встроена инфраструктура для сбора логов и метрик:
+* **Grafana** (Дашборды и визуализация) — доступна по адресу `http://localhost:3000` (логин/пароль настраиваются через `GRAFANA_ADMIN_USER` и `GRAFANA_ADMIN_PASSWORD` в `.env`).
+* **Loki + Promtail** — автоматический сбор всех логов контейнеров.
+* **Prometheus + cAdvisor** — сбор системных метрик контейнеров (CPU, RAM) и метрик самого приложения FastAPI (`/metrics`).
+
+Базовые дашборды для метрик и логов уже преднастроены и доступны в Grafana сразу после запуска контейнеров!
 
 ---
 

@@ -1,5 +1,10 @@
 services:
   api:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     build: .
     ports:
       - "0.0.0.0:${APP_PORT:-8000}:8000"
@@ -15,6 +20,11 @@ services:
 
 
   db:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     image: postgres:16-alpine
     env_file:
       - .env
@@ -23,7 +33,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-finance_pass}
       POSTGRES_DB: ${POSTGRES_DB:-finance_db}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -34,9 +44,14 @@ services:
       start_period: 3s
 
   redis:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
@@ -48,15 +63,25 @@ services:
       start_period: 3s
 
   loki:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     image: grafana/loki:3.0.0
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
     volumes:
       - ./loki:/etc/loki
     command: -config.file=/etc/loki/local-config.yaml
     restart: unless-stopped
 
   promtail:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     image: grafana/promtail:3.0.0
     volumes:
       - /var/log:/var/log
@@ -69,6 +94,11 @@ services:
       - loki
 
   grafana:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     image: grafana/grafana:9.5.15
     ports:
       - "3000:3000"
@@ -89,18 +119,28 @@ services:
       - prometheus
 
   prometheus:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     image: prom/prometheus:v2.51.0
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     restart: unless-stopped
 
   cadvisor:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     image: gcr.io/cadvisor/cadvisor:v0.49.1
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:rw

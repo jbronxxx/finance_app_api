@@ -12,6 +12,7 @@ from fastapi import Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from prometheus_fastapi_instrumentator import Instrumentator
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -73,6 +74,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+Instrumentator().instrument(app).expose(app)
+
 
 app.state.limiter = limiter
 

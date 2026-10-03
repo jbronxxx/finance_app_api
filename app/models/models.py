@@ -71,7 +71,7 @@ class Token(Base):
     Поля:
         id (uuid.UUID): Уникальный идентификатор токена (Primary Key).
         user_id (uuid.UUID): Внешний ключ на владельца токена (users.id).
-        token (str): JWT-токен.
+        token_hash (str): Хеш Refresh-токена.
         created_at (datetime): Дата и время создания токена.
         user (User): Связанный объект пользователя.
     """
@@ -80,7 +80,7 @@ class Token(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
-    token: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
+    token_hash: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="active")  # Статус токена (active, revoked, expired)

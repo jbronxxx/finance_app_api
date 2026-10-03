@@ -157,7 +157,7 @@ class AuthService:
 
         db_token = Token(
             user_id=user_uuid,
-            token=hashed_token,
+            token_hash=hashed_token,
             expires_at=expire,
             status="active",
         )
@@ -207,7 +207,7 @@ class AuthService:
         import hashlib
 
         hashed_token = hashlib.sha256(refresh_token_string.encode()).hexdigest()
-        db_token = self.db.query(Token).filter(Token.token == hashed_token, Token.status == "active").first()
+        db_token = self.db.query(Token).filter(Token.token_hash == hashed_token, Token.status == "active").first()
 
         if not db_token:
             logger.warning("Refresh-токен отсутствует в базе данных либо неактивен")

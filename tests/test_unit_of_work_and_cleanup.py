@@ -132,7 +132,7 @@ class TestTokenCleanup:
         # 1. Активный актуальный токен (не должен удаляться)
         active_token = Token(
             user_id=test_user.id,
-            token="active_token_current",
+            token_hash="active_token_current",
             expires_at=now + timedelta(days=7),
             created_at=now,
             status="active",
@@ -140,7 +140,7 @@ class TestTokenCleanup:
         # 2. Недавно истекший токен (< 30 дней, не должен удаляться по 30-дневному порогу)
         recent_expired_token = Token(
             user_id=test_user.id,
-            token="recent_expired_token",
+            token_hash="recent_expired_token",
             expires_at=now - timedelta(days=5),
             created_at=now - timedelta(days=6),
             status="expired",
@@ -148,7 +148,7 @@ class TestTokenCleanup:
         # 3. Недавно отозванный токен (< 30 дней, не должен удаляться)
         recent_revoked_token = Token(
             user_id=test_user.id,
-            token="recent_revoked_token",
+            token_hash="recent_revoked_token",
             expires_at=now + timedelta(days=1),
             created_at=now - timedelta(days=2),
             status="revoked",
@@ -156,7 +156,7 @@ class TestTokenCleanup:
         # 4. Старый истекший токен (> 30 дней, ДОЛЖЕН быть удален)
         old_expired_token = Token(
             user_id=test_user.id,
-            token="old_expired_token_45d",
+            token_hash="old_expired_token_45d",
             expires_at=now - timedelta(days=45),
             created_at=now - timedelta(days=46),
             status="expired",
@@ -164,7 +164,7 @@ class TestTokenCleanup:
         # 5. Старый отозванный токен (> 30 дней, ДОЛЖЕН быть удален)
         old_revoked_token = Token(
             user_id=test_user.id,
-            token="old_revoked_token_60d",
+            token_hash="old_revoked_token_60d",
             expires_at=now - timedelta(days=35),
             created_at=now - timedelta(days=60),
             status="revoked",
@@ -186,7 +186,7 @@ class TestTokenCleanup:
         assert deleted_count == 2
 
         remaining_tokens = db_session.query(Token).filter(Token.user_id == test_user.id).all()
-        remaining_strings = {t.token for t in remaining_tokens}
+        remaining_strings = {t.token_hash for t in remaining_tokens}
 
         assert "active_token_current" in remaining_strings
         assert "recent_expired_token" in remaining_strings
@@ -201,14 +201,14 @@ class TestTokenCleanup:
 
         token_10d = Token(
             user_id=test_user.id,
-            token="token_10d_ago",
+            token_hash="token_10d_ago",
             expires_at=now - timedelta(days=10),
             created_at=now - timedelta(days=11),
             status="expired",
         )
         token_2d = Token(
             user_id=test_user.id,
-            token="token_2d_ago",
+            token_hash="token_2d_ago",
             expires_at=now - timedelta(days=2),
             created_at=now - timedelta(days=3),
             status="expired",
@@ -219,7 +219,7 @@ class TestTokenCleanup:
         deleted = auth_service.cleanup_expired_tokens(retention_days=7)
         assert deleted == 1
 
-        remaining = db_session.query(Token).filter(Token.token == "token_2d_ago").first()
+        remaining = db_session.query(Token).filter(Token.token_hash == "token_2d_ago").first()
         assert remaining is not None
 
     def test_run_token_cleanup_task(self, db_session: Session, test_user: User):
@@ -227,7 +227,7 @@ class TestTokenCleanup:
         now = datetime.now(timezone.utc)
         old_token = Token(
             user_id=test_user.id,
-            token="stale_task_token",
+            token_hash="stale_task_token",
             expires_at=now - timedelta(days=40),
             created_at=now - timedelta(days=41),
             status="expired",
